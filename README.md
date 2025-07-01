@@ -405,7 +405,7 @@ We believe in **responsible AI for sustainable energy systems** in the social an
 - **Documentation**: [Wiki](https://github.com/chradden/energent/wiki)
 - **Issues**: [GitHub Issues](https://github.com/chradden/energent/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/chradden/energent/discussions)
-- **Email**: energent@ngd.de
+- **Email**: Christian.Radden@ngd.de
 
 ---
 

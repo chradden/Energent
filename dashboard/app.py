@@ -78,14 +78,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# NGD Logo und Kontakt oben rechts einfügen
-st.markdown(
-    f'''
-    <img src="dashboard/ngd_logo.png" class="ngd-logo" alt="NGD Logo" />
-    <div class="ngd-contact">Christian.Radden@ngd.de</div>
-    ''',
-    unsafe_allow_html=True
-)
+# NGD Logo und Kontakt sowie ENERGENT-Header
+col1, col2, col3 = st.columns([2, 4, 2])
+with col1:
+    st.empty()
+with col2:
+    st.markdown('<h1 class="main-header">⚡ ENERGENT</h1>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">Intelligent Multi-Agent System for CHP Optimization</p>', unsafe_allow_html=True)
+with col3:
+    st.image("dashboard/ngd_logo.png", width=110)
+    st.markdown('<div style="font-size:0.95rem; color:#444; margin-top:0.5rem; text-align:right;">Christian.Radden@ngd.de</div>', unsafe_allow_html=True)
 
 # Initialize session state
 if 'optimization_results' not in st.session_state:
@@ -94,9 +96,9 @@ if 'forecasts' not in st.session_state:
     st.session_state.forecasts = None
 
 def main():
-    # Header
-    st.markdown('<h1 class="main-header">⚡ ENERGENT</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">Intelligent Multi-Agent System for CHP Optimization</p>', unsafe_allow_html=True)
+    # Header (entfernt, da jetzt oben im Layout)
+    # st.markdown('<h1 class="main-header">⚡ ENERGENT</h1>', unsafe_allow_html=True)
+    # st.markdown('<p style="text-align: center; font-size: 1.2rem; color: #666;">Intelligent Multi-Agent System for CHP Optimization</p>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
