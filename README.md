@@ -95,7 +95,7 @@ EBERGENT/
 ### 1. Clone the repository
 
 
-git clone https://github.com/your-org/energent.git
+git clone https://github.com/chradden/energent.git
 cd energent
 
 
