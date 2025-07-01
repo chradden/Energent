@@ -6,7 +6,6 @@ ENERGENT is a modular, AI-powered system for economic optimization of CHP plants
 
 ## Dashboard Screenshot
 
-Das folgende Bild zeigt das interaktive Streamlit-Dashboard von ENERGENT:
 
 ![ENERGENT Dashboard](dashboard/dashboard_screenshot.png)
 
