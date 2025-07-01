@@ -139,4 +139,4 @@ This project is open-sourced under the MIT License (or specify your license). Se
 Developed by energy management and AI teams at Norddeutsche Gesellschaft für Diakonie (NGD), supported by external open-source communities.
 
 ##   🧭 Vision
-We believe in responsible AI for sustainable energy systems in the social and healthcare sector. KWK-AI Orchestrator empowers local facilities to run smarter, greener, and more cost-efficient.
+We believe in responsible AI for sustainable energy systems in the social and healthcare sector. ENERGENT empowers local facilities to run smarter, greener, and more cost-efficient.
