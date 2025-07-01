@@ -1,8 +1,8 @@
-# Energent
+# ENERGENT
 Agent-Based Energy Intelligence for CHP Operations
 
 
-# ⚡ KWK-AI Orchestrator
+## ⚡ ENERGENT - german: KWK-AI Orchestrator
 
 **Intelligent Multi-Agent System for Optimizing Combined Heat and Power (CHP) Operation**
 
