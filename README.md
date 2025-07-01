@@ -1,22 +1,24 @@
 # ENERGENT
-Agent-Based Energy Intelligence for CHP Operations
 
-
-## ⚡ ENERGENT - german: KWK-AI Orchestrator
 
 **Intelligent Multi-Agent System for Optimizing Combined Heat and Power (CHP) Operation**
 
-KWK-AI Orchestrator is a modular, AI-powered system for economic optimization of CHP plants with thermal storage and auxiliary boilers. It combines forecasting, optimization, and simulation in a transparent and responsible way – aligned with NGD’s AI strategy and GDPR requirements.
+ENERGENT is a modular, AI-powered system for economic optimization of CHP plants with thermal storage and auxiliary boilers. It combines forecasting, optimization, and simulation in a transparent and responsible way – aligned with NGD’s AI strategy and GDPR requirements.
 
 ---
 
 ## 🚦 Architecture Overview
 
-  Agent A ──→ Heat Demand Forecast
+Agent A ──→ Heat Demand Forecast
+
 Agent B ──→ Electricity Price Forecast
+
 Agent C ──→ Optimization Engine (LP/MILP or RL)
+
 Agent D ──→ Simulation Environment (Digital Twin)
+
 ↓
+
 Streamlit Dashboard
 
 
@@ -52,21 +54,36 @@ Digital twin of the CHP system. Evaluates any schedule by:
 
 ## 📁 Repository Structure
 
-kwk-ai-orchestrator/
+EBERGENT/
+
 ├── agents/
+
 │ ├── agent_a_heat_forecast.py
+
 │ ├── agent_b_price_forecast.py
+
 │ ├── agent_c_optimizer_lp.py
+
 │ ├── agent_c_optimizer_rl.py
+
 ├── simulation/
+
 │ └── agent_d_simulation.py
+
 ├── data/
+
 │ └── sample_profiles/ # heat_demand.csv, power_price.csv
+
 ├── dashboard/
+
 │ └── app.py # Streamlit interface
+
 ├── notebooks/
+
 │ └── development and experiments
+
 ├── requirements.txt
+
 └── README.md
 
 
@@ -78,8 +95,8 @@ kwk-ai-orchestrator/
 ### 1. Clone the repository
 
 
-git clone https://github.com/your-org/kwk-ai-orchestrator.git
-cd kwk-ai-orchestrator
+git clone https://github.com/your-org/energent.git
+cd energent
 
 
 ### 2. Install dependencies
