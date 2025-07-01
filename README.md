@@ -373,7 +373,7 @@ This project is open-sourced under the MIT License. See [LICENSE](LICENSE) for d
 
 ## 🤝 Contributors
 
-Developed by energy management and AI teams at **Norddeutsche Gesellschaft für Diakonie (NGD)**, supported by external open-source communities.
+Developed by energy manager Christian Radden at **Norddeutsche Gesellschaft für Diakonie (NGD)**, supported by external open-source communities.
 
 ### Contributing
 1. Fork the repository
