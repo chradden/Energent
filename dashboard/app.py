@@ -322,8 +322,23 @@ def run_rl_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max,
                        boiler_max, storage_capacity, fuel_price):
     """Run Reinforcement Learning optimization"""
     
+    # Setze Kopplungsfaktor alpha (wie im LP)
+    alpha = chp_heat_max / chp_power_max if chp_power_max > 0 else 1.0
+    eta_total_CHP = 0.85
+    eta_boiler = 0.90
+    
     # Create environment
-    env = CHPEnv(heat_demand, elec_price, initial_storage=storage_capacity/2)
+    env = CHPEnv(
+        heat_demand, elec_price, 
+        initial_storage=storage_capacity/2,
+        S_max=storage_capacity,
+        P_max_e=chp_power_max,
+        Boiler_max=boiler_max,
+        alpha=alpha,
+        eta_total_CHP=eta_total_CHP,
+        eta_boiler=eta_boiler,
+        fuel_price=fuel_price
+    )
     
     # Simple policy (for demo purposes)
     # In a real implementation, you would train a PPO agent here
