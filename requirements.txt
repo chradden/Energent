@@ -20,7 +20,6 @@ plotly>=5.15.0
 
 # Dashboard
 streamlit>=1.25.0
-streamlit-plotly-events>=0.0.8
 
 # Data Sources & APIs
 requests>=2.31.0

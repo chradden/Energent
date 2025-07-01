@@ -4,6 +4,12 @@
 
 ENERGENT is a modular, AI-powered system for economic optimization of CHP plants with thermal storage and auxiliary boilers. It combines forecasting, optimization, and simulation in a transparent and responsible way – aligned with NGD's AI strategy and GDPR requirements.
 
+## Dashboard Screenshot
+
+Das folgende Bild zeigt das interaktive Streamlit-Dashboard von ENERGENT:
+
+![ENERGENT Dashboard](dashboard/dashboard_screenshot.png)
+
 ---
 
 ## 🚦 Architecture Overview
