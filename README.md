@@ -96,13 +96,16 @@ EBERGENT/
 
 
 git clone https://github.com/chradden/energent.git
+
 cd energent
 
 
 ### 2. Install dependencies
 
 python -m venv venv
+
 source venv/bin/activate  # or .\venv\Scripts\activate on Windows
+
 pip install -r requirements.txt
 
 
@@ -111,16 +114,16 @@ pip install -r requirements.txt
 streamlit run dashboard/app.py
 
 
+---
 
-
-📊 Data Sources
+## 📊 Data Sources
 Heat demand: Synthetic or open datasets (e.g. Cornell CHP, Danish Smart Meter data)
 
 Electricity prices: ENTSO-E Transparency Platform or EPEX Spot
 
 Weather data: Open-Meteo, DWD, Meteostat
 
-✅ Compliance & Ethics
+## ✅ Compliance & Ethics
 This project follows the NGD AI Policy and is aligned with:
 
 GDPR (EU General Data Protection Regulation)
@@ -129,11 +132,11 @@ Ethical AI development principles
 
 Human-in-the-loop decision architecture
 
-📄 License
+## 📄 License
 This project is open-sourced under the MIT License (or specify your license). See LICENSE for details.
 
-🤝 Contributors
+## 🤝 Contributors
 Developed by energy management and AI teams at Norddeutsche Gesellschaft für Diakonie (NGD), supported by external open-source communities.
 
-🧭 Vision
+##   🧭 Vision
 We believe in responsible AI for sustainable energy systems in the social and healthcare sector. KWK-AI Orchestrator empowers local facilities to run smarter, greener, and more cost-efficient.
