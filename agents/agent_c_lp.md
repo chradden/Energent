@@ -1,0 +1,1000 @@
+Methode 1: LP/MILP-Modell für den Tagesfahrplan
+Modellübersicht: Wir formulieren ein Optimierungsmodell, das mit perfekter Voraussicht (d.h. bekannte Profile von Wärmelast und Strompreisen über 24 Stunden) einen optimalen Einsatzplan berechnet. In einem KWK-System bedeutet das: Das BHKW kann Strom erzeugen (der ins Netz verkauft wird) und dabei Wärme für das Wärmenetz liefern; der Zusatzkessel kann bei Bedarf zusätzliche Wärme bereitstellen (ohne Stromerzeugung); der Wärmespeicher kann Wärme zwischenspeichern, um Erzeugung und Bedarf zeitlich zu entkoppeln
+kwk-flexperten.net
+de.wikipedia.org
+. Bekannte Größen (Parameter) sind unter anderem der stündliche Wärmebedarf 
+𝑄
+𝑡
+demand
+Q 
+t
+demand
+​
+  und der Strompreis 
+𝑐
+𝑡
+el
+c 
+t
+el
+​
+  für jede Stunde t (typisch aus einer Day-Ahead-Prognose)
+energyinformatics.springeropen.com
+. Gegebenenfalls wird auch ein zeitvariabler Brennstoffpreis 
+𝑐
+𝑡
+fuel
+c 
+t
+fuel
+​
+  einbezogen – oft ist dieser aber über 24 Stunden konstant (z.B. Erdgaspreis in €/kWh). Das Modell entscheidet, wie das BHKW, der Speicher und der Kessel stündlich betrieben werden, um die Kosten zu minimieren bzw. Gewinne zu maximieren
+dispaset.eu
+. Variablen: Für jede Stunde 
+𝑡
+=
+1
+,
+.
+.
+.
+,
+24
+t=1,...,24 definieren wir folgende Entscheidungsvariablen:
+𝑃
+𝑡
+CHP
+P 
+t
+CHP
+​
+ : elektrische Leistung des BHKW (kW_el) in Stunde t. Diese bestimmt direkt die Stromerzeugung. Da das BHKW im KWK-Betrieb zugleich Wärme liefert, ist damit auch eine thermische Leistung verknüpft (siehe unten). 
+𝑃
+𝑡
+CHP
+P 
+t
+CHP
+​
+  kann kontinuierlich zwischen 0 und 
+𝑃
+max
+⁡
+CHP
+P 
+max
+CHP
+​
+  gewählt werden (bei einem modulierenden BHKW). Wird ein An/Aus-Zustand modelliert, käme zusätzlich eine Binärvariable 
+𝑢
+𝑡
+CHP
+∈
+{
+0
+,
+1
+}
+u 
+t
+CHP
+​
+ ∈{0,1} hinzu, welche 1 bedeutet „BHKW an in Stunde t“
+dispaset.eu
+dispaset.eu
+. In dem Fall gelten dann z.B. 
+𝑃
+𝑡
+CHP
+≤
+𝑢
+𝑡
+CHP
+⋅
+𝑃
+max
+⁡
+CHP
+P 
+t
+CHP
+​
+ ≤u 
+t
+CHP
+​
+ ⋅P 
+max
+CHP
+​
+  und ggf. 
+𝑃
+𝑡
+CHP
+≥
+𝑢
+𝑡
+CHP
+⋅
+𝑃
+min
+⁡
+CHP
+P 
+t
+CHP
+​
+ ≥u 
+t
+CHP
+​
+ ⋅P 
+min
+CHP
+​
+  (Mindestlast) sowie Verknüpfungen für Mindestlaufzeiten, Startkosten etc. (diese machen das Modell zum MILP)
+energyinformatics.springeropen.com
+. Für Einfachheit nehmen wir hier an, das BHKW kann stufenlos von 0 bis Volllast modulieren (LP-Modell).
+𝑄
+𝑡
+CHP
+Q 
+t
+CHP
+​
+ : Wärmeleistung des BHKW (kW_th) in Stunde t. Diese ist gekoppelt an die elektrische Leistung durch den KWK-Wirkungsgrad. Oft wird ein konstanter Wärme-Strom-Faktor angenommen. Beispielsweise könnte 
+𝑄
+𝑡
+CHP
+=
+𝛼
+⋅
+𝑃
+𝑡
+CHP
+Q 
+t
+CHP
+​
+ =α⋅P 
+t
+CHP
+​
+  mit 
+𝛼
+α als fester Wärme-Strom-Faktor formuliert werden
+mdpi.com
+mdpi.com
+. 
+𝛼
+α ergibt sich aus den technischen Daten des BHKW: Hat es z.B. 200 kW_el und 300 kW_th Nennleistung, dann 
+𝛼
+=
+300
+/
+200
+=
+1,5
+α=300/200=1,5 (das heißt 1 kW_el erzeugt gleichzeitig 1,5 kW_th Wärme). Alternativ kann man den Brennstoffeinsatz abbilden: etwa elektrische Effizienz 
+𝜂
+el
+η 
+el
+​
+  und thermische Effizienz 
+𝜂
+th
+η 
+th
+​
+  mit 
+𝑃
+𝑡
+CHP
+=
+𝜂
+el
+⋅
+𝐵
+𝑡
+P 
+t
+CHP
+​
+ =η 
+el
+​
+ ⋅B 
+t
+​
+  und 
+𝑄
+𝑡
+CHP
+=
+𝜂
+th
+⋅
+𝐵
+𝑡
+Q 
+t
+CHP
+​
+ =η 
+th
+​
+ ⋅B 
+t
+​
+ , wobei 
+𝐵
+𝑡
+B 
+t
+​
+  der Brennstoffleistung (kW Brennstoff) entspricht. Für lineare Modelle ist die feste 
+𝛼
+α-Relation jedoch ausreichend (sie ergibt sich aus 
+𝜂
+el
+η 
+el
+​
+  und 
+𝜂
+th
+η 
+th
+​
+ ; beispielsweise 
+𝜂
+el
+=
+0
+,
+33
+η 
+el
+​
+ =0,33, 
+𝜂
+th
+=
+0
+,
+5
+η 
+th
+​
+ =0,5 → 
+𝛼
+=
+0
+,
+5
+/
+0
+,
+33
+≈
+1
+,
+5
+α=0,5/0,33≈1,5). Realistisch liegen 
+𝜂
+el
+η 
+el
+​
+  bei BHKWs je nach Größe bei 25–44 % und Gesamtwirkungsgrade bei 80–90 %
+de.wikipedia.org
+ – wir nehmen hier exemplarisch 33 % el. und 50 % th. (gesamt 83 %).
+𝑄
+𝑡
+boiler
+Q 
+t
+boiler
+​
+ : Wärmeleistung des Zusatzkessels (kW_th) in Stunde t. Dieser kann unabhängig vom BHKW Wärme liefern (z.B. ein Gas- oder Ölkessel). Wir begrenzen ihn durch 
+0
+≤
+𝑄
+𝑡
+boiler
+≤
+𝑄
+max
+⁡
+boiler
+0≤Q 
+t
+boiler
+​
+ ≤Q 
+max
+boiler
+​
+ . Der Kessel hat einen Wirkungsgrad 
+𝜂
+boiler
+η 
+boiler
+​
+  (z.B. 90 % typisch für Brennwertkessel)
+de.wikipedia.org
+. Im Unterschied zum BHKW erzeugt er nur Wärme (keinen Strom). Er dient zur Deckung von Bedarfsspitzen oder wenn das BHKW aus wirtschaftlichen Gründen nicht läuft.
+𝑄
+𝑡
+charge
+Q 
+t
+charge
+​
+ : Ladeleistung des Speichers in Stunde t (kW_th, Wärme, die eingespeichert wird). Diese Variable tritt auf, wenn das BHKW mehr Wärme produziert als aktuell benötigt – die Überschusswärme kann in den Pufferspeicher geladen werden. Beschränkung z.B. 
+𝑄
+𝑡
+charge
+≥
+0
+Q 
+t
+charge
+​
+ ≥0 und ggf. eine maximale Ladeleistung (oft limitiert durch BHKW-Leistung oder Leitungen).
+𝑄
+𝑡
+discharge
+Q 
+t
+discharge
+​
+ : Entladeleistung des Speichers in Stunde t (kW_th, Wärme, die aus dem Speicher entnommen wird, um Bedarf zu decken). Auch hier 
+𝑄
+𝑡
+discharge
+≥
+0
+Q 
+t
+discharge
+​
+ ≥0 und ggf. eine max. Entladeleistung.
+𝑆
+𝑡
+S 
+t
+​
+ : Speicherfüllstand (Energieinhalt, z.B. kWh) des Wärmespeichers am Ende von Stunde t. Dieser wird durch die Speichergröße begrenzt: 
+0
+≤
+𝑆
+𝑡
+≤
+𝑆
+max
+⁡
+0≤S 
+t
+​
+ ≤S 
+max
+​
+  (Kapazität in kWh). Außerdem benötigt man einen Anfangswert 
+𝑆
+0
+S 
+0
+​
+  (z.B. Füllstand zu Tagesbeginn) und evtl. Endwert-Bedingungen (man kann z.B. fordern 
+𝑆
+24
+=
+𝑆
+0
+S 
+24
+​
+ =S 
+0
+​
+ , wenn der Speicher am Tagesende wieder den Anfangsstand haben soll – bei täglich wiederholter Optimierung sinnvoll).
+Nebenbedingungen: Das Modell unterliegt verschiedenen Constraints, um physikalische und betriebliche Grenzen abzubilden:
+Wärmebilanz pro Stunde: In jeder Stunde muss der Wärmebedarf gedeckt werden. Dieser Bedarf kann gedeckt werden durch die BHKW-Wärme, die der Speicher gerade liefert, und den Kessel. Andererseits kann ein Überschuss an erzeugter Wärme in den Speicher geladen werden. Dies lässt sich mit einer Bilanzgleichung ausdrücken, etwa:
+𝑄
+𝑡
+CHP
++
+𝑄
+𝑡
+boiler
++
+𝑄
+𝑡
+discharge
+=
+𝑄
+𝑡
+demand
++
+𝑄
+𝑡
+charge
+,
+∀
+𝑡
+.
+Q 
+t
+CHP
+​
+ +Q 
+t
+boiler
+​
+ +Q 
+t
+discharge
+​
+ =Q 
+t
+demand
+​
+ +Q 
+t
+charge
+​
+ ,∀t.
+Hier geht die linke Seite (Erzeugung aus BHKW und Kessel plus eventuelle Speicherentladung) vollständig entweder in Deckung der Nachfrage oder ins Laden des Speichers
+dispaset.eu
+. Ist die linke Seite größer als der Bedarf, so entspricht 
+𝑄
+𝑡
+charge
+Q 
+t
+charge
+​
+  dem Überschuss, der eingelagert wird. Ist die linke Seite kleiner als Bedarf, dann muss 
+𝑄
+𝑡
+discharge
+Q 
+t
+discharge
+​
+  positiv sein – d.h. es wird fehlende Wärme aus dem Speicher entnommen (sofern verfügbar), um die Gleichung zu erfüllen. Diese Gleichung koppelt also die Entscheidungen und stellt sicher, dass kein Wärmedefizit entsteht (ansonsten müsste 
+𝑄
+𝑡
+discharge
+Q 
+t
+discharge
+​
+  den Fehlbetrag als Entnahme liefern, oder das Optimierungsproblem würde infeasible). In einigen Modellen wird ein Slack eingeführt für Notfälle (z.B. 
+𝑄
+𝑡
+slack
+Q 
+t
+slack
+​
+  für nicht gedeckte Wärme, mit großem Strafkostenfaktor)
+dispaset.eu
+dispaset.eu
+ – in unserem Planer sollte das jedoch vermieden werden. Stattdessen deckt im Zweifel der Zusatzkessel alles Nötige, da wir ihn ohne hohen Strafkoeffizienten mit einplanen.
+Speicher-Dynamik: Der Speicherfüllstand entwickelt sich über die Zeit je nach Laden/Entladen. Eine lineare Beziehung pro Zeitschritt (hier Stunde) ist:
+𝑆
+𝑡
+=
+𝑆
+𝑡
+−
+1
++
+𝜂
+charge
+⋅
+𝑄
+𝑡
+charge
+−
+1
+𝜂
+discharge
+⋅
+𝑄
+𝑡
+discharge
+,
+∀
+𝑡
+=
+1
+,
+…
+,
+24
+,
+S 
+t
+​
+ =S 
+t−1
+​
+ +η 
+charge
+​
+ ⋅Q 
+t
+charge
+​
+ − 
+η 
+discharge
+​
+ 
+1
+​
+ ⋅Q 
+t
+discharge
+​
+ ,∀t=1,…,24,
+wobei 
+𝜂
+charge
+η 
+charge
+​
+  / 
+𝜂
+discharge
+η 
+discharge
+​
+  optionale Wirkungsgrade des Speichers sind (z.B. 100 % wenn verlustfrei, ansonsten <1). Für viele Wärmespeicher (Wassertanks) kann man Verluste über 24h meist vernachlässigen oder pauschal ansetzen; hier nehmen wir idealisiert 
+𝜂
+=
+1
+η=1. Dazu kommen Kapazitätsgrenzen 
+0
+≤
+𝑆
+𝑡
+≤
+𝑆
+max
+⁡
+0≤S 
+t
+​
+ ≤S 
+max
+​
+  und Anfangsbedingung 
+𝑆
+0
+S 
+0
+​
+  (z.B. bekannt oder als Variable mit zusätzlich zu optimierender Startbedingung). Gelegentlich wird ein Selbstentladungsverlust pro Zeitschritt modelliert (z.B. ein Bruchteil des Inhalts geht verloren)
+dispaset.eu
+ – in Kurzzeit-Betrachtungen kann das oft weggelassen werden oder linear approximiert. In Dispa-SET z.B. lautet die Speicherbilanz: Speicherstand vorher + Input = Speicherstand nachher + abgegebene Wärme + Verluste
+dispaset.eu
+.
+Kopplung von BHKW Strom und Wärme: Wie oben erwähnt, verknüpft man 
+𝑃
+𝑡
+CHP
+P 
+t
+CHP
+​
+  und 
+𝑄
+𝑡
+CHP
+Q 
+t
+CHP
+​
+ . In einfachster Form als lineare Proportionalität: 
+𝑄
+𝑡
+CHP
+=
+𝛼
+⋅
+𝑃
+𝑡
+CHP
+Q 
+t
+CHP
+​
+ =α⋅P 
+t
+CHP
+​
+ . Damit ist implizit angenommen, dass das BHKW immer mit konstantem Verhältnis arbeitet (z.B. bei einem Gas-Otto-BHKW ist die Wärmeauskopplung relativ fest, wenn nicht gerade ein variabler Kühlmodus existiert). Fortgeschrittene Modelle erlauben gewisse Polygone (Feasible Operating Region) für Strom/Wärme – z.B. Backpressure vs. Extraction Turbine mit variablem Entnahmeverhältnis
+mdpi.com
+. Für unseren Zweck genügt die lineare Relation, die sicherstellt: Wenn das BHKW Strom produziert, fällt automatisch entsprechend Wärme an (oder umgekehrt). Zusätzlich begrenzen wir 
+0
+≤
+𝑃
+𝑡
+CHP
+≤
+𝑃
+max
+⁡
+CHP
+0≤P 
+t
+CHP
+​
+ ≤P 
+max
+CHP
+​
+  und 
+0
+≤
+𝑄
+𝑡
+CHP
+≤
+𝑄
+max
+⁡
+CHP
+0≤Q 
+t
+CHP
+​
+ ≤Q 
+max
+CHP
+​
+ . Falls wir Binärvariablen 
+𝑢
+𝑡
+CHP
+u 
+t
+CHP
+​
+  nutzen (MIP), dann: 
+𝑃
+𝑡
+CHP
+≤
+𝑢
+𝑡
+⋅
+𝑃
+max
+⁡
+P 
+t
+CHP
+​
+ ≤u 
+t
+​
+ ⋅P 
+max
+​
+  und 
+𝑃
+𝑡
+CHP
+≥
+𝑢
+𝑡
+⋅
+𝑃
+min
+⁡
+P 
+t
+CHP
+​
+ ≥u 
+t
+​
+ ⋅P 
+min
+​
+  (Mindestlast bei Betrieb)
+dispaset.eu
+. Ebenso könnten Minimale und Maximale Wärmeabnahme Grenzen formuliert werden, falls das Netz eine Mindestwärme braucht (hier nicht der Fall; wir haben es als Bedarf vorgegeben). Rampenbeschränkungen oder Mindestlaufzeiten können ebenfalls als lineare Ungleichungen mit Binärvariablen abgebildet werden
+energyinformatics.springeropen.com
+energyinformatics.springeropen.com
+, was das Modell detaillierter aber rechenaufwändiger macht. Für einen 24h-Horizont und ein einzelnes BHKW sind diese Feinheiten oft zweitrangig; wir konzentrieren uns daher auf das ökonomische Dispatch-Problem mit perfekten Prognosen.
+Boiler-Beschränkungen: Analog: 
+0
+≤
+𝑄
+𝑡
+boiler
+≤
+𝑄
+max
+⁡
+boiler
+0≤Q 
+t
+boiler
+​
+ ≤Q 
+max
+boiler
+​
+ . Falls auch der Kessel ein An/Aus-Verhalten hat, könnte man Binärvariablen nutzen, aber meist können moderne Brenner modulieren oder wir behandeln ihn kontinuierlich. Sein Wirkungsgrad 
+𝜂
+boiler
+η 
+boiler
+​
+  bestimmt die Brennstoffnutzung.
+Keine Gleichzeitigkeit Laden/Entladen: Eine praktische Nebenbedingung ist, dass der Speicher nicht gleichzeitig geladen und entladen werden sollte. In obiger Wärmebilanzgleichung kann es theoretisch passieren, dass das Modell paralleles Laden und Entladen nutzt, falls das kostenneutral wäre (z.B. wegen Linearkombination), aber in optimalen Lösungen mit Verlusten oder gleichen Kosten ergibt sich das normalerweise nicht. Wenn man es strikt ausschließen will, könnte man eine Binärvariable oder big-M Trick einführen, was aber zusätzliche Ganzzahligkeit bringt. Wir belassen es dabei, dass das Modell selbst entscheiden wird, entweder 
+𝑄
+𝑡
+charge
+Q 
+t
+charge
+​
+  oder 
+𝑄
+𝑡
+discharge
+Q 
+t
+discharge
+​
+  ungleich Null zu machen, abhängig von Wirtschaftlichkeit (gleichzeitiges Hin-und-her wäre ineffizient, insbesondere wenn Verluste angenommen werden).
+Zielfunktion: Die Zielfunktion formulieren wir als Maximierung des Gesamtgewinns über 24 Stunden (oder äquivalent Minimierung der Gesamtkosten). Gewinn ergibt sich hier hauptsächlich aus den Erlösen für erzeugten Strom abzüglich der Kosten für eingesetzten Brennstoff (im BHKW und Kessel). Formal kann man z.B. folgende Summe maximieren:
+max
+⁡
+∑
+𝑡
+=
+1
+24
+(
+𝑐
+𝑡
+el
+⋅
+𝑃
+𝑡
+CHP
+  
+−
+  
+𝑐
+fuel,CHP
+⋅
+𝐵
+𝑡
+CHP
+  
+−
+  
+𝑐
+fuel,Boiler
+⋅
+𝐵
+𝑡
+boiler
+)
+,
+max 
+t=1
+∑
+24
+​
+ (c 
+t
+el
+​
+ ⋅P 
+t
+CHP
+​
+ −c 
+fuel,CHP
+ ⋅B 
+t
+CHP
+​
+ −c 
+fuel,Boiler
+ ⋅B 
+t
+boiler
+​
+ ),
+wobei 
+𝑐
+𝑡
+el
+c 
+t
+el
+​
+  der Strompreis (Erlös pro kWh Strom) in Stunde t ist, 
+𝐵
+𝑡
+CHP
+B 
+t
+CHP
+​
+  der Brennstoffeinsatz des BHKW (in kWh) und 
+𝐵
+𝑡
+boiler
+B 
+t
+boiler
+​
+  der Brennstoffeinsatz des Kessels. Man kann 
+𝐵
+B durch die oben genannten Variablen ausdrücken: z.B. 
+𝐵
+𝑡
+CHP
+=
+𝑃
+𝑡
+CHP
++
+𝑄
+𝑡
+CHP
+𝜂
+total
+B 
+t
+CHP
+​
+ = 
+η 
+total
+​
+ 
+P 
+t
+CHP
+​
+ +Q 
+t
+CHP
+​
+ 
+​
+  für das BHKW (Gesamtwirkungsgrad)
+energyinformatics.springeropen.com
+ und 
+𝐵
+𝑡
+boiler
+=
+𝑄
+𝑡
+boiler
+𝜂
+boiler
+B 
+t
+boiler
+​
+ = 
+η 
+boiler
+​
+ 
+Q 
+t
+boiler
+​
+ 
+​
+ . Setzt man dies ein, bleibt die Zielfunktion linear in den Entscheidungsvariablen. Alternativ verteilt man den Brennstoffverbrauch auf Strom und Wärme: z.B. Kosten termweise 
+𝑐
+fuel
+⋅
+𝑃
+𝑡
+CHP
+/
+𝜂
+el
++
+𝑐
+fuel
+⋅
+𝑄
+𝑡
+CHP
+/
+𝜂
+th
++
+𝑐
+fuel
+⋅
+𝑄
+𝑡
+boiler
+/
+𝜂
+boiler
+c 
+fuel
+ ⋅P 
+t
+CHP
+​
+ /η 
+el
+​
+ +c 
+fuel
+ ⋅Q 
+t
+CHP
+​
+ /η 
+th
+​
+ +c 
+fuel
+ ⋅Q 
+t
+boiler
+​
+ /η 
+boiler
+​
+  und Einnahme 
+𝑐
+𝑡
+el
+𝑃
+𝑡
+CHP
+c 
+t
+el
+​
+ P 
+t
+CHP
+​
+ . Beide Darstellungen sind äquivalent. In Worten: Für jede Stunde berechnen wir Gewinn = Stromerlös minus Brennstoffkosten, und summieren über den Tag
+energyinformatics.springeropen.com
+. Optional könnte man Start-/Stopp-Kosten des BHKW (z.B. Wartungskosten pro Anfahrt) in die Zielfunktion addieren, was wieder eine Binärvariable benötigt (etwa 
+𝛿
+𝑡
+startup
+δ 
+t
+startup
+​
+  und Kosten 
+𝑐
+startup
+c 
+startup
+ 
+energyinformatics.springeropen.com
+). Hier verzichten wir darauf, um den Fokus auf die Fahrplan-Optimierung zu legen. Zusammengefasst: Das Optimierungsproblem maximiert also den Tagesnettogewinn unter allen obigen Nebenbedingungen. Da alle Gleichungen linear sind und – abgesehen von evtl. Binärvariablen für An/Aus – kontinuierliche Variablen vorkommen, handelt es sich um ein LP (bzw. MILP falls Binärvariablen inkludiert). Solche Modelle werden häufig für Unit Commitment und Einsatzplanung verwendet und können mit Standard-Solvern gelöst werden
+dispaset.eu
+dispaset.eu
+. Beispielhafte Python-Implementierung (PuLP/Pyomo): Man kann dieses Modell in Python z.B. mit PuLP (Linear Programming in Python) oder Pyomo formulieren. 
