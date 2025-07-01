@@ -56,8 +56,36 @@ st.markdown("""
         background-color: #f8d7da;
         color: #721c24;
     }
+    .ngd-logo {
+        position: absolute;
+        top: 1.5rem;
+        right: 2.5rem;
+        width: 120px;
+        z-index: 10;
+    }
+    .ngd-contact {
+        position: absolute;
+        top: 7.5rem;
+        right: 2.7rem;
+        font-size: 0.95rem;
+        color: #444;
+        background: rgba(255,255,255,0.8);
+        padding: 0.2rem 0.7rem;
+        border-radius: 0.3rem;
+        z-index: 10;
+        text-align: right;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# NGD Logo und Kontakt oben rechts einfügen
+st.markdown(
+    f'''
+    <img src="dashboard/ngd_logo.png" class="ngd-logo" alt="NGD Logo" />
+    <div class="ngd-contact">Christian.Radden@ngd.de</div>
+    ''',
+    unsafe_allow_html=True
+)
 
 # Initialize session state
 if 'optimization_results' not in st.session_state:
