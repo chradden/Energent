@@ -1,0 +1,45 @@
+{
+    "system_parameters": {
+        "chp": {
+            "P_max": 200.0,
+            "Q_max": 300.0,
+            "eta_el": 0.35,
+            "eta_th": 0.50,
+            "eta_total": 0.85,
+            "alpha": 1.5
+        },
+        "boiler": {
+            "Q_max": 400.0,
+            "eta": 0.90
+        },
+        "storage": {
+            "capacity": 2000.0,
+            "initial_level": 1000.0,
+            "charge_efficiency": 0.95,
+            "discharge_efficiency": 0.95
+        },
+        "economics": {
+            "fuel_price": 0.03,
+            "maintenance_cost_chp": 0.005,
+            "maintenance_cost_boiler": 0.002
+        }
+    },
+    "forecasting": {
+        "horizon": 24,
+        "update_frequency": "hourly",
+        "weather_api": {
+            "lat": 53.5511,
+            "lon": 9.9937,
+            "timezone": "Europe/Berlin"
+        }
+    },
+    "optimization": {
+        "methods": ["linear_programming", "reinforcement_learning"],
+        "default_method": "linear_programming",
+        "constraints": {
+            "min_uptime": 2,
+            "min_downtime": 1,
+            "ramp_rate": 0.2
+        }
+    }
+} 
