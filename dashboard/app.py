@@ -161,17 +161,24 @@ try:
     cet = pytz.timezone('Europe/Berlin')
     tomorrow = (datetime.now(cet) + timedelta(days=1)).date()
     timestamps = [datetime.combine(tomorrow, datetime.min.time()) + timedelta(hours=h) for h in range(24)]
-    import plotly.graph_objects as go
-    fig_pv = go.Figure()
-    fig_pv.add_trace(go.Scatter(x=timestamps, y=pv_pred, mode='lines+markers', name='PV-Output (kW)', line=dict(color='gold', width=2)))
-    fig_pv.update_layout(title="PV-Leistungsvorhersage (24h)", xaxis_title="Zeit", yaxis_title="PV-Leistung (kW)", height=400)
-    st.plotly_chart(fig_pv, use_container_width=True)
-    # Tabelle mit PV-Vorhersagewerten anzeigen
+    # Tabelle mit PV-Vorhersagewerten erzeugen
     import pandas as pd
     df_pv = pd.DataFrame({
         'Zeit': timestamps,
         'PV-Leistung (kW)': pv_pred
     })
+    st.write("Länge timestamps:", len(timestamps))
+    st.write("Länge pv_pred:", len(pv_pred))
+    st.write("Typ pv_pred:", type(pv_pred))
+    st.write("Typ df_pv['PV-Leistung (kW)']:", df_pv['PV-Leistung (kW)'].dtype)
+    df_pv['PV-Leistung (kW)'] = df_pv['PV-Leistung (kW)'].astype(float)
+    df_pv = df_pv.sort_values('Zeit')
+    # PV-Graphik direkt aus der Tabelle erzeugen
+    import plotly.graph_objects as go
+    fig_pv = go.Figure()
+    fig_pv.add_trace(go.Scatter(x=df_pv['Zeit'], y=df_pv['PV-Leistung (kW)'], mode='lines+markers', name='PV-Output (kW)', line=dict(color='gold', width=2)))
+    fig_pv.update_layout(title="PV-Leistungsvorhersage (24h)", xaxis_title="Zeit", yaxis_title="PV-Leistung (kW)", height=400)
+    st.plotly_chart(fig_pv, use_container_width=True)
     st.dataframe(df_pv, use_container_width=True)
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
@@ -382,13 +389,20 @@ def run_optimization(heat_model, opt_method,
         
         # Agent A - Heat Forecast
         agent_a = AgentAHeatForecast(model_type=heat_model)
-        weather_data = agent_a.get_weather_data()
+        # Dummy-DataFrame für heat_demand (48 Stunden, aktueller und nächster Tag)
+        import pandas as pd
+        import pytz
+        from datetime import datetime, timedelta
+        cet = pytz.timezone('Europe/Berlin')
+        now = datetime.now(cet)
+        timestamps = [now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=h) for h in range(48)]
+        heat_demand_dummy = pd.DataFrame({'timestamp': timestamps})
+        weather_data = agent_a.get_weather_data(heat_demand_dummy)
         agent_a.train(weather_data)
         heat_forecast = agent_a.predict(weather_data)
         
         # Agent B - Price Forecast (jetzt: echter Day-Ahead für morgen, 0-24 Uhr)
         agent_b = AgentBPriceForecast()
-        from datetime import timedelta
         import pytz
         cet = pytz.timezone('Europe/Berlin')
         now = datetime.now(cet)
