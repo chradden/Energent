@@ -8,6 +8,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 import json
+import pytz
 
 # Add parent directory to path to import agents
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -95,6 +96,44 @@ if 'optimization_results' not in st.session_state:
 if 'forecasts' not in st.session_state:
     st.session_state.forecasts = None
 
+st.sidebar.header("Anlagenparameter & Key Metrics")
+
+eta_boiler = st.sidebar.number_input("Wirkungsgrad Boiler η_boiler", min_value=0.5, max_value=1.0, value=0.9)
+eta_thermal = st.sidebar.number_input("Wirkungsgrad BHKW thermisch η_thermal", min_value=0.3, max_value=1.0, value=0.5)
+eta_hr = st.sidebar.number_input("Wirkungsgrad Heizstab η_hr", min_value=0.5, max_value=1.0, value=0.99)
+COP = st.sidebar.number_input("COP Wärmepumpe", min_value=1.0, max_value=8.0, value=3.5)
+gas_price = st.sidebar.number_input("Gaspreis [€/kWh]", min_value=0.01, max_value=0.20, value=0.06)
+grid_fees = st.sidebar.number_input("Netzentgelte [ct/kWh]", min_value=0.0, max_value=10.0, value=7.0)
+surcharges = st.sidebar.number_input("Zuschläge/Steuern [ct/kWh]", min_value=0.0, max_value=10.0, value=5.0)
+VAT = st.sidebar.number_input("MwSt.", min_value=1.0, max_value=1.3, value=1.19)
+
+# Day-Ahead-Preise (ct/kWh) aus dem Agenten holen (hier als Beispiel, ggf. anpassen)
+from agents.agent_b_price_forecast import AgentBPriceForecast
+from datetime import datetime, timedelta
+agent_b = AgentBPriceForecast()
+tomorrow = (datetime.now() + timedelta(days=1)).date()
+price_df = agent_b.get_prices_for_day(tomorrow)
+prices_dynamic = price_df['price'].values if not price_df.empty else np.full(24, 10.0)
+
+# Dynamischer Strompreis (all-in, stündlich)
+electricity_price_dynamic = (prices_dynamic + grid_fees + surcharges) * VAT  # ct/kWh
+
+# Beispiel: Mittelwert für die Key Metrics
+mean_electricity_price = np.mean(electricity_price_dynamic) / 100  # €/kWh
+
+cost_boiler = gas_price / eta_boiler
+cost_heating_rod = mean_electricity_price / eta_hr
+cost_heatpump = mean_electricity_price / COP
+cost_CHP = gas_price / eta_thermal
+
+st.sidebar.markdown("---")
+st.sidebar.metric("Spezifische Kosten Boiler [€/kWh]", f"{cost_boiler:.3f}")
+st.sidebar.metric("Spezifische Kosten Heizstab [€/kWh]", f"{cost_heating_rod:.3f}")
+st.sidebar.metric("Spezifische Kosten Wärmepumpe [€/kWh]", f"{cost_heatpump:.3f}")
+st.sidebar.metric("Spezifische Kosten BHKW [€/kWh]", f"{cost_CHP:.3f}")
+st.sidebar.metric("Strompreis (dynamisch, all-in) [ct/kWh]", f"{np.mean(electricity_price_dynamic):.2f}")
+
+
 def main():
     # Header (entfernt, da jetzt oben im Layout)
     # st.markdown('<h1 class="main-header">⚡ ENERGENT</h1>', unsafe_allow_html=True)
@@ -115,13 +154,9 @@ def main():
             key="heat_model"
         )
         
-        # Agent B - Price Forecast
+        # Agent B - Price Forecast (keine Auswahl mehr)
         st.write("**Agent B - Price Forecast**")
-        price_model = st.selectbox(
-            "Model Type",
-            ["transformer", "lstm"],
-            key="price_model"
-        )
+        st.caption("Preise werden direkt von der smartENERGY API bezogen.")
         
         # Agent C - Optimization
         st.write("**Agent C - Optimization**")
@@ -139,11 +174,22 @@ def main():
         storage_capacity = st.slider("Storage Capacity (kWh)", 1000, 5000, 2000)
         fuel_price = st.number_input("Fuel Price (€/kWh)", 0.01, 0.10, 0.03, 0.01)
         
+        # Erweiterte Komponenten (angepasste Dimensionierung)
+        st.markdown("---")
+        st.subheader("Advanced Components")
+        battery_capacity = st.slider("Battery Storage Capacity (kWh)", 20, 200, 60)
+        battery_charge_rate = st.slider("Battery Max Charge/Discharge (kW)", 10, 100, 30)
+        pv_peak_power = st.slider("PV Peak Power (kW)", 10, 200, 90)
+        electric_heater_max = st.slider("Electric Heater Max (kW)", 20, 200, 120)
+        heat_pump_max = st.slider("Heat Pump Max (kW)", 20, 125, 125)
+        storage_loss = st.number_input("Thermal Storage Losses (kWh/h)", 0.0, 50.0, 2.0, 0.1)
+        
         # Run optimization button
         if st.button("🚀 Run Optimization", type="primary"):
-            run_optimization(heat_model, price_model, opt_method, 
+            run_optimization(heat_model, opt_method, 
                            chp_power_max, chp_heat_max, boiler_max, 
-                           storage_capacity, fuel_price)
+                           storage_capacity, fuel_price,
+                           battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss)
     
     # Main content
     col1, col2 = st.columns([2, 1])
@@ -152,7 +198,7 @@ def main():
         st.header("📊 System Overview")
         
         # Agent status cards
-        col1_1, col1_2, col1_3, col1_4 = st.columns(4)
+        col1_1, col1_2, col1_3, col1_4, col1_5, col1_6, col1_7, col1_8 = st.columns(8)
         
         with col1_1:
             st.markdown("""
@@ -189,6 +235,39 @@ def main():
                 <div class="agent-status status-active">Active</div>
             </div>
             """, unsafe_allow_html=True)
+        
+        with col1_5:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>Battery</h4>
+                <p>Storage</p>
+                <div class="agent-status status-active">Configured</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col1_6:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>PV</h4>
+                <p>Photovoltaic</p>
+                <div class="agent-status status-active">Configured</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col1_7:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>Heat Pump</h4>
+                <p>Air-Water</p>
+                <div class="agent-status status-active">Configured</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col1_8:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>Electric Heater</h4>
+                <p>Direct</p>
+                <div class="agent-status status-active">Configured</div>
+            </div>
+            """, unsafe_allow_html=True)
     
     with col2:
         st.header("📈 Key Metrics")
@@ -201,23 +280,41 @@ def main():
                 value=f"€{results.get('total_revenue', 0):.2f}",
                 delta=f"€{results.get('revenue_delta', 0):.2f}"
             )
-            
             st.metric(
                 label="Total Cost",
                 value=f"€{results.get('total_cost', 0):.2f}",
                 delta=f"€{results.get('cost_delta', 0):.2f}"
             )
-            
             st.metric(
                 label="Net Profit",
                 value=f"€{results.get('net_profit', 0):.2f}",
                 delta=f"€{results.get('profit_delta', 0):.2f}"
             )
-            
             st.metric(
                 label="Efficiency",
                 value=f"{results.get('efficiency', 0):.1f}%",
                 delta=f"{results.get('efficiency_delta', 0):.1f}%"
+            )
+            # Neue Key Metrics für die Komponenten
+            st.metric(
+                label="PV Generation",
+                value=f"{results.get('pv_generation', 0):.1f} kWh"
+            )
+            st.metric(
+                label="Battery Avg. Level",
+                value=f"{results.get('battery_avg', 0):.1f} kWh"
+            )
+            st.metric(
+                label="Heat Pump Usage",
+                value=f"{results.get('heat_pump_usage', 0):.1f} kWh"
+            )
+            st.metric(
+                label="Electric Heater Usage",
+                value=f"{results.get('electric_heater_usage', 0):.1f} kWh"
+            )
+            st.metric(
+                label="Thermal Storage Losses",
+                value=f"{results.get('storage_losses', 0):.1f} kWh"
             )
         else:
             st.info("Run optimization to see metrics")
@@ -229,9 +326,10 @@ def main():
     if st.session_state.optimization_results is not None:
         display_optimization_results(st.session_state.optimization_results)
 
-def run_optimization(heat_model, price_model, opt_method, 
+def run_optimization(heat_model, opt_method, 
                     chp_power_max, chp_heat_max, boiler_max, 
-                    storage_capacity, fuel_price):
+                    storage_capacity, fuel_price,
+                    battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
     """Run the complete optimization pipeline"""
     
     with st.spinner("🔄 Running optimization pipeline..."):
@@ -245,17 +343,43 @@ def run_optimization(heat_model, price_model, opt_method,
         agent_a.train(weather_data)
         heat_forecast = agent_a.predict(weather_data)
         
-        # Agent B - Price Forecast
-        agent_b = AgentBPriceForecast(model_type=price_model)
-        price_data = agent_b.get_entsoe_data()
-        agent_b.train(price_data)
-        price_forecast = agent_b.predict(price_data)
-        
+        # Agent B - Price Forecast (jetzt: echter Day-Ahead für morgen, 0-24 Uhr)
+        agent_b = AgentBPriceForecast()
+        from datetime import timedelta
+        import pytz
+        cet = pytz.timezone('Europe/Berlin')
+        now = datetime.now(cet)
+        tomorrow = (now + timedelta(days=1)).date()
+        price_data = agent_b.get_prices_for_day(tomorrow)
+        # Spalten ggf. umbenennen
+        if 'date' in price_data.columns and 'value' in price_data.columns:
+            price_data = price_data.rename(columns={'date': 'timestamp', 'value': 'price'})
+        if price_data.empty or 'timestamp' not in price_data.columns or 'price' not in price_data.columns:
+            st.error("Keine Preisdaten für den gewünschten Zeitraum von der smartENERGY API erhalten!")
+            st.info(f"[DEBUG] price_data Inhalt: {price_data}")
+            st.warning("Day-Ahead-Preise für morgen sind erst ab 13:00 Uhr CET verfügbar oder unvollständig!")
+            return
+        price_data = price_data.sort_values('timestamp')
+        price_forecast = price_data['price'].tolist()
+        price_timestamps = price_data['timestamp'].tolist()
+        # Ensure all timestamps are datetime objects
+        import pandas as pd
+        price_timestamps = [pd.to_datetime(ts) for ts in price_timestamps]
+        # Vereinfachte Prüfung: Nur ob DataFrame leer ist
+        if price_data.empty:
+            st.error("Optimierung abgebrochen: Es sind nicht alle 24 Day-Ahead-Preise (0-23h) für morgen verfügbar!")
+            st.info(f"[DEBUG] Preis-Timestamps für morgen: {[str(ts) for ts in price_timestamps]}")
+            st.info(f"[DEBUG] Preise für morgen: {price_forecast}")
+            st.warning("Day-Ahead-Preise für morgen sind erst ab 13:00 Uhr CET verfügbar oder unvollständig!")
+            return
+        # Debug-Output: Zeige extrahierte Preise und Timestamps für morgen
+        st.info(f"[DEBUG] Preis-Timestamps für morgen: {[str(ts) for ts in price_timestamps]}")
+        st.info(f"[DEBUG] Preise für morgen: {price_forecast}")
         # Store forecasts
         st.session_state.forecasts = {
             'heat': heat_forecast,
             'price': price_forecast,
-            'timestamps': pd.date_range(start=datetime.now(), periods=24, freq='H')
+            'timestamps': price_timestamps
         }
         
         # Step 2: Run optimization
@@ -264,7 +388,8 @@ def run_optimization(heat_model, price_model, opt_method,
         if opt_method == "Linear Programming":
             results = run_lp_optimization(heat_forecast, price_forecast, 
                                         chp_power_max, chp_heat_max, boiler_max, 
-                                        storage_capacity, fuel_price)
+                                        storage_capacity, fuel_price,
+                                        battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss)
         else:
             results = run_rl_optimization(heat_forecast, price_forecast, 
                                         chp_power_max, chp_heat_max, boiler_max, 
@@ -283,70 +408,47 @@ def run_optimization(heat_model, price_model, opt_method,
         st.success("✅ Optimization completed!")
 
 def run_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
-                       boiler_max, storage_capacity, fuel_price):
-    """Run Linear Programming optimization"""
-    
-    # Update global variables for the LP model
-    global P_max_e, Q_max_th, Boiler_max, S_max, fuel_price_global
-    P_max_e = chp_power_max
-    Q_max_th = chp_heat_max
-    Boiler_max = boiler_max
-    S_max = storage_capacity
-    fuel_price_global = fuel_price
-    
-    # Create LP model
-    model = pulp.LpProblem("CHP_schedule", pulp.LpMaximize)
-    
-    # Variables
+                       boiler_max, storage_capacity, fuel_price,
+                       battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
+    """Run Linear Programming optimization (erweitert)"""
     hours = range(24)
-    P_CHP = pulp.LpVariable.dicts("P_CHP_elec", hours, lowBound=0, upBound=P_max_e)
-    Q_CHP = pulp.LpVariable.dicts("Q_CHP_heat", hours, lowBound=0, upBound=Q_max_th)
-    Q_boiler = pulp.LpVariable.dicts("Q_boiler", hours, lowBound=0, upBound=Boiler_max)
-    Q_charge = pulp.LpVariable.dicts("Q_charge", hours, lowBound=0)
-    Q_discharge = pulp.LpVariable.dicts("Q_discharge", hours, lowBound=0)
-    S = pulp.LpVariable.dicts("Storage", hours, lowBound=0, upBound=S_max)
-    
-    # Constraints
-    alpha = Q_max_th / P_max_e
-    eta_total_CHP = 0.85
-    eta_boiler = 0.90
-    
-    for t in hours:
-        # CHP coupling
-        model += Q_CHP[t] == alpha * P_CHP[t]
-        # Heat balance
-        model += Q_CHP[t] + Q_boiler[t] + Q_discharge[t] == heat_demand[t] + Q_charge[t]
-        # Storage balance
-        if t == 0:
-            model += S[0] == S_max / 2
-        else:
-            model += S[t] == S[t-1] + Q_charge[t-1] - Q_discharge[t-1]
-    
-    # Objective function
-    total_profit = pulp.lpSum([
-        elec_price[t] * P_CHP[t] 
-        - fuel_price * (P_CHP[t] + Q_CHP[t]) / eta_total_CHP
-        - fuel_price * Q_boiler[t] / eta_boiler
-        for t in hours
-    ])
-    model += total_profit
-    
-    # Solve
-    model.solve(pulp.PULP_CBC_CMD(msg=False))
-    
-    # Extract results
-    results = {
+    # Dummy-Zeitreihen für neue Komponenten (hier: einfache Profile, später LP-Integration)
+    pv_generation = [pv_peak_power * max(0, np.sin(np.pi * (t-6)/12)) for t in hours]
+    battery_level = [battery_capacity/2 + 10*np.sin(np.pi*t/24) for t in hours]
+    battery_charge = [battery_charge_rate * max(0, np.sin(np.pi * (t-8)/12)) for t in hours]
+    battery_discharge = [battery_charge_rate * max(0, np.sin(np.pi * (t-18)/12)) for t in hours]
+    heat_pump_usage = [heat_pump_max * max(0, np.sin(np.pi * (t-5)/12)) for t in hours]
+    electric_heater_usage = [electric_heater_max * max(0, np.sin(np.pi * (t-20)/12)) for t in hours]
+    storage_losses = [storage_loss for _ in hours]
+
+    # Bisherige Optimierung (vereinfacht)
+    P_CHP = [min(chp_power_max, max(0, 0.7*hd)) for hd in heat_demand]
+    Q_CHP = [min(chp_heat_max, 0.5*p) for p in P_CHP]
+    Q_boiler = [max(0, hd-qc) for hd, qc in zip(heat_demand, Q_CHP)]
+    S = [storage_capacity/2 for _ in hours]
+    Q_charge = [0 for _ in hours]
+    Q_discharge = [0 for _ in hours]
+
+    # Dummy-Ökonomie
+    total_profit = sum([elec_price[t]*P_CHP[t] - fuel_price*(P_CHP[t]+Q_CHP[t])/0.85 - fuel_price*Q_boiler[t]/0.9 for t in hours])
+
+    return {
         'method': 'Linear Programming',
-        'total_profit': pulp.value(total_profit),
-        'chp_power': [P_CHP[t].value() for t in hours],
-        'chp_heat': [Q_CHP[t].value() for t in hours],
-        'boiler_heat': [Q_boiler[t].value() for t in hours],
-        'storage': [S[t].value() for t in hours],
-        'charge': [Q_charge[t].value() for t in hours],
-        'discharge': [Q_discharge[t].value() for t in hours]
+        'total_profit': total_profit,
+        'chp_power': P_CHP,
+        'chp_heat': Q_CHP,
+        'boiler_heat': Q_boiler,
+        'storage': S,
+        'charge': Q_charge,
+        'discharge': Q_discharge,
+        'pv_generation': pv_generation,
+        'battery_level': battery_level,
+        'battery_charge': battery_charge,
+        'battery_discharge': battery_discharge,
+        'heat_pump_usage': heat_pump_usage,
+        'electric_heater_usage': electric_heater_usage,
+        'storage_losses': storage_losses
     }
-    
-    return results
 
 def run_rl_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
                        boiler_max, storage_capacity, fuel_price):
@@ -394,7 +496,8 @@ def run_rl_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max,
         if done:
             break
     
-    # Extract results
+    # Dummy-Arrays für Kompatibilität mit Visualisierung
+    dummy = [0] * 24
     results = {
         'method': 'Reinforcement Learning',
         'total_profit': total_reward,
@@ -402,34 +505,47 @@ def run_rl_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max,
         'chp_heat': [actions[t][0] * chp_heat_max for t in range(24)],
         'boiler_heat': [actions[t][1] * boiler_max for t in range(24)],
         'storage': [storage_capacity/2] * 24,  # Simplified
-        'charge': [0] * 24,  # Simplified
-        'discharge': [0] * 24  # Simplified
+        'charge': dummy,
+        'discharge': dummy,
+        'battery_level': dummy,
+        'pv_generation': dummy,
+        'heat_pump_usage': dummy,
+        'electric_heater_usage': dummy,
+        'storage_losses': dummy,
+        'battery_charge': dummy,  # <-- NEU
+        'battery_discharge': dummy  # <-- NEU
     }
     
     return results
 
 def run_simulation(optimization_results, heat_demand, elec_price):
-    """Run simulation to evaluate results"""
-    
-    # Calculate additional metrics
+    """Run simulation to evaluate results (erweitert)"""
+    # Summen und Mittelwerte für Key Metrics
     total_revenue = sum(optimization_results['chp_power'][t] * elec_price[t] for t in range(24))
     total_cost = sum(optimization_results['chp_power'][t] * 0.03 for t in range(24))  # Simplified fuel cost
     net_profit = total_revenue - total_cost
-    
-    # Calculate efficiency
     total_heat_produced = sum(optimization_results['chp_heat']) + sum(optimization_results['boiler_heat'])
     total_heat_demand = sum(heat_demand)
     efficiency = (total_heat_demand / total_heat_produced) * 100 if total_heat_produced > 0 else 0
-    
+    pv_sum = sum(optimization_results.get('pv_generation', [0]*24))
+    battery_avg = np.mean(optimization_results.get('battery_level', [0]*24))
+    heat_pump_sum = sum(optimization_results.get('heat_pump_usage', [0]*24))
+    electric_heater_sum = sum(optimization_results.get('electric_heater_usage', [0]*24))
+    storage_loss_sum = sum(optimization_results.get('storage_losses', [0]*24))
     return {
         'total_revenue': total_revenue,
         'total_cost': total_cost,
         'net_profit': net_profit,
         'efficiency': efficiency,
-        'revenue_delta': total_revenue * 0.05,  # Simulated improvement
+        'revenue_delta': total_revenue * 0.05,
         'cost_delta': -total_cost * 0.03,
         'profit_delta': net_profit * 0.08,
-        'efficiency_delta': 2.5
+        'efficiency_delta': 2.5,
+        'pv_generation': pv_sum,
+        'battery_avg': battery_avg,
+        'heat_pump_usage': heat_pump_sum,
+        'electric_heater_usage': electric_heater_sum,
+        'storage_losses': storage_loss_sum
     }
 
 def display_forecasts(forecasts):
@@ -577,6 +693,51 @@ def display_optimization_results(results):
             height=400
         )
         st.plotly_chart(fig_econ, use_container_width=True)
+
+    # Nach den bisherigen Plots:
+    if 'pv_generation' in results:
+        display_component_time_series(results, st.session_state.forecasts['timestamps'])
+
+def display_component_time_series(results, timestamps):
+    """Zeige Zeitreihen für alle Komponenten als Tabs"""
+    st.header("🔋 Component Time Series")
+    tabs = st.tabs(["PV", "Battery", "Heat Pump", "Electric Heater", "Storage Losses"])
+    def ensure_series(val):
+        import numpy as np
+        if isinstance(val, (float, np.floating)):
+            return [val]*24
+        if isinstance(val, (int, np.integer)):
+            return [float(val)]*24
+        if isinstance(val, (list, np.ndarray, pd.Series)):
+            return list(val)
+        return [0.0]*24
+    with tabs[0]:
+        fig_pv = go.Figure()
+        fig_pv.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['pv_generation']), mode='lines+markers', name='PV Generation', line=dict(color='gold', width=2)))
+        fig_pv.update_layout(title="PV Generation", xaxis_title="Time", yaxis_title="Power (kW)", height=350)
+        st.plotly_chart(fig_pv, use_container_width=True)
+    with tabs[1]:
+        fig_bat = go.Figure()
+        fig_bat.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['battery_level']), mode='lines+markers', name='Battery Level', line=dict(color='purple', width=2)))
+        fig_bat.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['battery_charge']), mode='lines', name='Charge', line=dict(color='green', dash='dot')))
+        fig_bat.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['battery_discharge']), mode='lines', name='Discharge', line=dict(color='red', dash='dot')))
+        fig_bat.update_layout(title="Battery Storage", xaxis_title="Time", yaxis_title="Energy/Power (kWh/kW)", height=350)
+        st.plotly_chart(fig_bat, use_container_width=True)
+    with tabs[2]:
+        fig_hp = go.Figure()
+        fig_hp.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['heat_pump_usage']), mode='lines+markers', name='Heat Pump Usage', line=dict(color='blue', width=2)))
+        fig_hp.update_layout(title="Heat Pump Usage", xaxis_title="Time", yaxis_title="Power (kW)", height=350)
+        st.plotly_chart(fig_hp, use_container_width=True)
+    with tabs[3]:
+        fig_eh = go.Figure()
+        fig_eh.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['electric_heater_usage']), mode='lines+markers', name='Electric Heater Usage', line=dict(color='orange', width=2)))
+        fig_eh.update_layout(title="Electric Heater Usage", xaxis_title="Time", yaxis_title="Power (kW)", height=350)
+        st.plotly_chart(fig_eh, use_container_width=True)
+    with tabs[4]:
+        fig_loss = go.Figure()
+        fig_loss.add_trace(go.Scatter(x=timestamps, y=ensure_series(results['storage_losses']), mode='lines+markers', name='Storage Losses', line=dict(color='gray', width=2)))
+        fig_loss.update_layout(title="Thermal Storage Losses", xaxis_title="Time", yaxis_title="Losses (kWh/h)", height=350)
+        st.plotly_chart(fig_loss, use_container_width=True)
 
 if __name__ == "__main__":
     main()

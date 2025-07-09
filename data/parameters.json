@@ -12,16 +12,64 @@
             "Q_max": 400.0,
             "eta": 0.90
         },
-        "storage": {
+        "thermal_storage": {
             "capacity": 2000.0,
             "initial_level": 1000.0,
             "charge_efficiency": 0.95,
-            "discharge_efficiency": 0.95
+            "discharge_efficiency": 0.95,
+            "min_level": 100.0,
+            "max_level": 1900.0
+        },
+        "battery_storage": {
+            "capacity": 100.0,
+            "initial_level": 50.0,
+            "charge_efficiency": 0.92,
+            "discharge_efficiency": 0.92,
+            "min_level": 10.0,
+            "max_level": 95.0,
+            "max_charge_rate": 50.0,
+            "max_discharge_rate": 50.0,
+            "self_discharge_rate": 0.001
+        },
+        "photovoltaic": {
+            "peak_power": 150.0,
+            "efficiency": 0.18,
+            "tilt_angle": 35.0,
+            "azimuth": 180.0,
+            "temperature_coefficient": -0.004,
+            "inverter_efficiency": 0.96,
+            "soiling_factor": 0.95,
+            "shading_factor": 0.98
+        },
+        "heat_pump": {
+            "Q_max": 250.0,
+            "P_max": 60.0,
+            "cop_nominal": 4.2,
+            "cop_min": 2.5,
+            "cop_max": 5.5,
+            "min_outdoor_temp": -20.0,
+            "max_outdoor_temp": 35.0,
+            "min_water_temp": 30.0,
+            "max_water_temp": 65.0,
+            "defrost_power": 2.0
+        },
+        "electric_heaters": {
+            "Q_max": 200.0,
+            "eta": 0.99,
+            "stages": 3,
+            "stage_powers": [50.0, 75.0, 75.0],
+            "min_water_temp": 30.0,
+            "max_water_temp": 85.0
         },
         "economics": {
             "fuel_price": 0.03,
+            "electricity_price_buy": 0.25,
+            "electricity_price_sell": 0.08,
             "maintenance_cost_chp": 0.005,
-            "maintenance_cost_boiler": 0.002
+            "maintenance_cost_boiler": 0.002,
+            "maintenance_cost_heat_pump": 0.003,
+            "maintenance_cost_pv": 0.001,
+            "battery_degradation_cost": 0.02
         }
     },
     "forecasting": {
@@ -39,7 +87,9 @@
         "constraints": {
             "min_uptime": 2,
             "min_downtime": 1,
-            "ramp_rate": 0.2
+            "ramp_rate": 0.2,
+            "grid_connection_limit": 100.0,
+            "battery_cycle_limit": 5000
         }
     }
 } 
