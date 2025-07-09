@@ -13,16 +13,13 @@ from typing import Dict, List, Tuple, Optional
 
 class LSTMHeatForecaster(nn.Module):
     """LSTM-based heat demand forecaster"""
-    
-    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2, output_size: int = 24):
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2, output_size: int = 96):
         super(LSTMHeatForecaster, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
         self.fc = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(0.2)
-        
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
         lstm_out = self.dropout(lstm_out[:, -1, :])
@@ -31,12 +28,20 @@ class LSTMHeatForecaster(nn.Module):
 
 class AgentAHeatForecast:
     """Agent A: Heat Demand Forecasting"""
-    
-    def __init__(self, model_type: str = "lstm"):
+    def __init__(self, model_type: str = "lstm", device: Optional[str] = None, batch_size: int = 64, window_hours: int = 24, resolution_minutes: int = 15):
         self.model_type = model_type
         self.scaler = MinMaxScaler()
         self.model = None
         self.is_trained = False
+        self.batch_size = batch_size
+        self.window_hours = window_hours
+        self.resolution_minutes = resolution_minutes
+        self.points_per_hour = 60 // self.resolution_minutes
+        self.window_size = self.window_hours * self.points_per_hour
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
         
     # def get_weather_data(self, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
     #     """Fetch weather data from Open-Meteo API"""
@@ -87,7 +92,7 @@ class AgentAHeatForecast:
         df = pd.DataFrame({
             'timestamp': dates,
             'temperature': temperature,
-            'humidity': 60 + np.random.normal(0, 10, len(dates)),
+            'humidity': 55 + np.random.normal(0, 10, len(dates)),
             'wind_speed': 5 + np.random.exponential(3, len(dates)),
             'precipitation': np.random.exponential(0.1, len(dates)),
             'hour': dates.hour,
@@ -115,6 +120,7 @@ class AgentAHeatForecast:
 
         demand = (base_demand * weekend_factor * temp_factor + noise).clip(50, 500)
         return pd.Series(demand, index=weather_df.index)
+    
 
     def get_weather_data(self, heat_demand: pd.DataFrame, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
         """
@@ -188,48 +194,149 @@ class AgentAHeatForecast:
                 target_index = pd.DatetimeIndex(target_index)
             return self._generate_synthetic_weather(target_index=target_index)
     
-    def prepare_data(self, weather_df: pd.DataFrame, heat_demand: Optional[pd.Series] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare data for training"""
+    def prepare_data(
+        self,
+        weather_df: pd.DataFrame,
+        heat_demand: Optional[pd.Series] = None,
+        window_hours: Optional[int] = None,
+        resolution_minutes: Optional[int] = None
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare data for training, also returns the timestamps for each target window."""
         if heat_demand is None:
             heat_demand = self._generate_synthetic_heat_demand(weather_df)
-        
-        # Combine features
         features = weather_df[['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'is_weekend']].values
         targets = heat_demand.values
-        
-        # Normalize features
+        timestamps = weather_df.index
+        wh = window_hours if window_hours is not None else self.window_hours
+        rm = resolution_minutes if resolution_minutes is not None else self.resolution_minutes
+        points_per_hour = 60 // rm
+        window_size = wh * points_per_hour
+        # Only scale features
         features_scaled = self.scaler.fit_transform(features)
-        
-        # Create sequences (24 hours of history to predict next 24 hours)
-        X, y = [], []
-        for i in range(24, len(features_scaled) - 23):
-            X.append(features_scaled[i-24:i])
-            y.append(targets[i:i+24])
-        
-        return np.array(X), np.array(y)
+        X, y, y_timestamps = [], [], []
+        for i in range(window_size, len(features_scaled) - window_size + 1):
+            X.append(features_scaled[i-window_size:i])
+            y.append(targets[i:i+window_size])
+            y_timestamps.append(timestamps[i:i+window_size])
+        return np.array(X), np.array(y), np.array(y_timestamps)
 
+    def prepare_data_weather_only(self, weather_df: pd.DataFrame, heat_demand: Optional[pd.Series] = None, window_hours: int = 24, resolution_minutes: int = 15) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare data using only weather features to predict heat demand."""
+        if heat_demand is None:
+            heat_demand = self._generate_synthetic_heat_demand(weather_df)
+        features = weather_df[['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'is_weekend']].values
+        targets = heat_demand.values
+        timestamps = weather_df.index
+        points_per_hour = 60 // resolution_minutes
+        window_size = window_hours * points_per_hour
+        features_scaled = self.scaler.fit_transform(features)
+        X, y, y_timestamps = [], [], []
+        for i in range(window_size, len(features_scaled)):
+            X.append(features_scaled[i-window_size:i])
+            y.append(targets[i])
+            y_timestamps.append(timestamps[i])
+        return np.array(X), np.array(y), np.array(y_timestamps)
 
-    
+    def prepare_data_history_only(self, heat_demand: pd.Series, window_hours: int = 24, resolution_minutes: int = 15) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare data using only past heat demand to predict next value."""
+        targets = np.asarray(heat_demand.values)
+        timestamps = heat_demand.index
+        points_per_hour = 60 // resolution_minutes
+        window_size = window_hours * points_per_hour
+        X, y, y_timestamps = [], [], []
+        for i in range(window_size, len(targets)):
+            X.append(targets[i-window_size:i])
+            y.append(targets[i])
+            y_timestamps.append(timestamps[i])
+        X = np.array(X).reshape(-1, window_size, 1)  # shape: (samples, window, 1)
+        return X, np.array(y), np.array(y_timestamps)
+
+    def prepare_data_history_weather(self, weather_df: pd.DataFrame, heat_demand: pd.Series, window_hours: int = 24, resolution_minutes: int = 15) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare data using both past heat demand and current weather to predict next value."""
+        features = weather_df[['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'is_weekend']].values
+        targets = np.asarray(heat_demand.values)
+        timestamps = weather_df.index
+        points_per_hour = 60 // resolution_minutes
+        window_size = window_hours * points_per_hour
+        features_scaled = self.scaler.fit_transform(features)
+        X, y, y_timestamps = [], [], []
+        for i in range(window_size, len(features_scaled)):
+            # Concatenate past heat demand and current weather
+            past_heat = targets[i-window_size:i].reshape(-1, 1)
+            current_weather = features_scaled[i].reshape(1, -1)
+            # Repeat current weather for each step in window (or just use at t?)
+            # Here, concatenate past_heat and current_weather for each step
+            combined = np.concatenate([past_heat, np.repeat(current_weather, window_size, axis=0)], axis=1)
+            X.append(combined)
+            y.append(targets[i])
+            y_timestamps.append(timestamps[i])
+        return np.array(X), np.array(y), np.array(y_timestamps)
+
+    def prepare_weather_only_onetoone(self, weather_df: pd.DataFrame, target_series: pd.Series):
+        """Prepare data: X = weather at t, y = heat at t (one-to-one)."""
+        features = weather_df[['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'is_weekend']].values
+        targets = np.asarray(target_series.values)
+        timestamps = weather_df.index
+        min_len = min(len(features), len(targets))
+        X = features[:min_len]
+        y = targets[:min_len]
+        y_times = timestamps[:min_len]
+        return X, y, y_times
+
+    def prepare_history_only_window_one(self, series: pd.Series, window_size: int = 96):
+        """Prepare data: X = previous window_size heat values, y = heat at t (history only, window + one)."""
+        heat_values = np.asarray(series.values)
+        timestamps = series.index
+        X, y, y_times = [], [], []
+        for i in range(window_size, len(heat_values)):
+            past_heat = heat_values[i-window_size:i]
+            X.append(past_heat)
+            y.append(heat_values[i])
+            y_times.append(timestamps[i])
+        X = np.array(X)  # shape: (samples, window_size)
+        return X, np.array(y), np.array(y_times)
+
+    def prepare_history_weather_window_one(self, series: pd.Series, weather_df: pd.DataFrame, window_size: int = 96):
+        """Prepare data: X = previous window_size heat values + weather at t, y = heat at t (history + weather, window + one)."""
+        heat_values = np.asarray(series.values)
+        weather_features = weather_df[['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'is_weekend']].values
+        timestamps = series.index
+        X, y, y_times = [], [], []
+        for i in range(window_size, len(heat_values)):
+            past_heat = heat_values[i-window_size:i]
+            weather_now = weather_features[i]
+            X.append(np.concatenate([past_heat, weather_now]))
+            y.append(heat_values[i])
+            y_times.append(timestamps[i])
+        X = np.array(X)  # shape: (samples, window_size + n_features)
+        return X, np.array(y), np.array(y_times)
+
     def train_lstm(self, X: np.ndarray, y: np.ndarray, epochs: int = 100):
-        """Train LSTM model"""
+        """Train LSTM model with mini-batch and device support"""
+        from torch.utils.data import DataLoader, TensorDataset
         input_size = X.shape[2]
-        self.model = LSTMHeatForecaster(input_size=input_size)
-        
+        output_size = self.window_size
+        self.model = LSTMHeatForecaster(input_size=input_size, output_size=output_size).to(self.device)
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
-        
         X_tensor = torch.FloatTensor(X)
         y_tensor = torch.FloatTensor(y)
-        
+        dataset = TensorDataset(X_tensor, y_tensor)
+        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         for epoch in range(epochs):
-            optimizer.zero_grad()
-            outputs = self.model(X_tensor)
-            loss = criterion(outputs, y_tensor)
-            loss.backward()
-            optimizer.step()
-            
+            self.model.train()
+            epoch_loss = 0
+            for xb, yb in loader:
+                xb = xb.to(self.device)
+                yb = yb.to(self.device)
+                optimizer.zero_grad()
+                outputs = self.model(xb)
+                loss = criterion(outputs, yb)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item() * xb.size(0)
             if epoch % 20 == 0:
-                print(f'Epoch {epoch}, Loss: {loss.item():.4f}')
+                print(f'Epoch {epoch}, Loss: {epoch_loss / len(dataset):.4f}')
     
     def train_xgboost(self, X: np.ndarray, y: np.ndarray):
         """Train XGBoost model"""
@@ -259,19 +366,71 @@ class AgentAHeatForecast:
         )
         self.model.fit(df_prophet)
     
+    def train_lstm_generic(self, X: np.ndarray, y: np.ndarray, epochs: int = 100, input_size: Optional[int] = None, batch_size: Optional[int] = None):
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        torch.cuda.empty_cache()
+        # Ensure X is 3D for LSTM
+        if len(X.shape) == 2:
+            X = X.reshape((X.shape[0], 1, X.shape[1]))
+        if input_size is None:
+            input_size = X.shape[2]
+        if batch_size is None:
+            batch_size = 16  # Lower default batch size for memory efficiency
+        self.model = LSTMHeatForecaster(input_size=input_size, output_size=1).to(self.device)
+        criterion = nn.MSELoss()
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+        X_tensor = torch.FloatTensor(X)
+        y_tensor = torch.FloatTensor(y).unsqueeze(-1)  # shape: (samples, 1)
+        dataset = TensorDataset(X_tensor, y_tensor)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        for epoch in range(epochs):
+            self.model.train()
+            epoch_loss = 0
+            for xb, yb in loader:
+                xb = xb.to(self.device)
+                yb = yb.to(self.device)
+                optimizer.zero_grad()
+                outputs = self.model(xb)
+                loss = criterion(outputs, yb)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item() * xb.size(0)
+            if epoch % 20 == 0:
+                print(f'Epoch {epoch}, Loss: {epoch_loss / len(dataset):.4f}')
+
+    def predict_lstm_generic(self, X: np.ndarray, batch_size: int = 16) -> np.ndarray:
+        if self.model is None:
+            raise ValueError("LSTM model is not initialized. Please train the model before prediction.")
+        self.model.eval()
+        preds = []
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        # Ensure X is 3D for LSTM
+        if len(X.shape) == 2:
+            X = X.reshape((X.shape[0], 1, X.shape[1]))
+        X_tensor = torch.FloatTensor(X)
+        dataset = TensorDataset(X_tensor)
+        loader = DataLoader(dataset, batch_size=batch_size)
+        with torch.no_grad():
+            for (xb,) in loader:
+                xb = xb.to(self.device)
+                pred = self.model(xb).cpu().numpy().flatten()
+                preds.append(pred)
+        return np.concatenate(preds)
+
     def train(self, weather_df: pd.DataFrame, heat_demand: Optional[pd.Series] = None):
         """Train the forecasting model"""
         print(f"Training {self.model_type.upper()} model...")
         if self.model_type == "lstm":
-            X, y = self.prepare_data(weather_df, heat_demand)
+            X, y, _ = self.prepare_data(weather_df, heat_demand)
             self.train_lstm(X, y)
         elif self.model_type == "xgboost":
-            X, y = self.prepare_data(weather_df, heat_demand)
+            X, y, _ = self.prepare_data(weather_df, heat_demand)
             self.train_xgboost(X, y)
         elif self.model_type == "prophet":
             if heat_demand is None:
                 heat_demand = self._generate_synthetic_heat_demand(weather_df)
-            # Ensure timestamps is a DatetimeIndex
             if isinstance(weather_df.index, pd.DatetimeIndex):
                 timestamps = weather_df.index
             else:
@@ -286,40 +445,45 @@ class AgentAHeatForecast:
             raise ValueError("Model must be trained before prediction")
         
         if self.model_type == "lstm":
-            X, _ = self.prepare_data(weather_df)
+            X, y, _ = self.prepare_data(weather_df)
             if len(X) > 0:
-                X_tensor = torch.FloatTensor(X[-1:])  # Use last sequence
+                if self.model is None:
+                    raise ValueError("LSTM model is not initialized. Please train the model before prediction.")
+                X_tensor = torch.FloatTensor(X[-1:]).to(self.device)  # Use last sequence
+                self.model.eval()
                 with torch.no_grad():
-                    prediction = self.model(X_tensor).numpy()[0]
+                    prediction = self.model(X_tensor).cpu().numpy()[0]
                 return prediction
             else:
-                return np.full(24, 250)  # Default prediction
-                
+                return np.full(self.window_size, 250)  # Default prediction
         elif self.model_type == "xgboost":
-            X, _ = self.prepare_data(weather_df)
+            X, y, _ = self.prepare_data(weather_df)
             if len(X) > 0:
+                if self.model is None:
+                    raise ValueError("XGBoost model is not initialized. Please train the model before prediction.")
                 X_flat = X[-1:].reshape(1, -1)
                 prediction = []
-                for i in range(24):
+                for i in range(self.window_size):
                     pred = self.model.predict(X_flat)[0]
                     prediction.append(pred)
-                    # Update features for next prediction (simplified)
                     X_flat[0, i*6:(i+1)*6] = X_flat[0, (i-1)*6:i*6]  # Shift features
-                return np.array(prediction)
+                prediction = np.array(prediction)
+                return prediction
             else:
-                return np.full(24, 250)
-                
+                return np.full(self.window_size, 250)
         elif self.model_type == "prophet":
-            future = self.model.make_future_dataframe(periods=24, freq='H')
+            if self.model is None:
+                raise ValueError("Prophet model is not initialized. Please train the model before prediction.")
+            freq = f'{self.resolution_minutes}min'
+            future = self.model.make_future_dataframe(periods=self.window_size, freq=freq)
             forecast = self.model.predict(future)
-            return forecast['yhat'].tail(24).values
-        
-        return np.full(24, 250)  # Fallback
-    
+            return forecast['yhat'].tail(self.window_size).values
+        return np.full(self.window_size, 250)  # Fallback
+
     def evaluate(self, weather_df: pd.DataFrame, actual_demand: pd.Series) -> Dict[str, float]:
         """Evaluate model performance"""
         predicted = self.predict(weather_df)
-        actual = actual_demand.values[:24]  # First 24 hours
+        actual = actual_demand.values[:self.window_size]  # First 24 hours
         
         mae = mean_absolute_error(actual, predicted)
         rmse = np.sqrt(mean_squared_error(actual, predicted))
@@ -329,6 +493,16 @@ class AgentAHeatForecast:
             'rmse': rmse,
             'mape': np.mean(np.abs((actual - predicted) / actual)) * 100
         }
+
+    def evaluate_multiple_models(self, y_true: np.ndarray, preds_dict: dict) -> dict:
+        """Evaluate multiple models' predictions. preds_dict: {name: y_pred}"""
+        results = {}
+        for name, y_pred in preds_dict.items():
+            mae = mean_absolute_error(y_true, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+            mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+            results[name] = {'mae': mae, 'rmse': rmse, 'mape': mape}
+        return results
 
 # Example usage
 if __name__ == "__main__":
@@ -347,7 +521,7 @@ if __name__ == "__main__":
     
     # Save forecast to file
     forecast_df = pd.DataFrame({
-        'timestamp': pd.date_range(start=datetime.now(), periods=24, freq='H'),
+        'timestamp': pd.date_range(start=datetime.now(), periods=agent_a.window_size, freq='H'),
         'heat_demand_forecast': forecast
     })
     forecast_df.to_csv('DATA/heat_demand_forecast.csv', index=False)
