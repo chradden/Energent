@@ -38,50 +38,53 @@ class AgentAHeatForecast:
         self.model = None
         self.is_trained = False
         
-    def get_weather_data(self, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
-        """Fetch weather data from Open-Meteo API"""
-        url = f"https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
-            "timezone": "Europe/Berlin"
-        }
+    # def get_weather_data(self, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
+    #     """Fetch weather data from Open-Meteo API"""
+    #     url = f"https://api.open-meteo.com/v1/forecast"
+    #     params = {
+    #         "latitude": lat,
+    #         "longitude": lon,
+    #         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
+    #         "timezone": "Europe/Berlin"
+    #     }
         
-        try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
+    #     try:
+    #         response = requests.get(url, params=params)
+    #         response.raise_for_status()
+    #         data = response.json()
             
-            df = pd.DataFrame({
-                'timestamp': pd.to_datetime(data['hourly']['time']),
-                'temperature': data['hourly']['temperature_2m'],
-                'humidity': data['hourly']['relative_humidity_2m'],
-                'wind_speed': data['hourly']['wind_speed_10m'],
-                'precipitation': data['hourly']['precipitation']
-            })
+    #         df = pd.DataFrame({
+    #             'timestamp': pd.to_datetime(data['hourly']['time']),
+    #             'temperature': data['hourly']['temperature_2m'],
+    #             'humidity': data['hourly']['relative_humidity_2m'],
+    #             'wind_speed': data['hourly']['wind_speed_10m'],
+    #             'precipitation': data['hourly']['precipitation']
+    #         })
             
-            # Add time features
-            df['hour'] = df['timestamp'].dt.hour
-            df['day_of_week'] = df['timestamp'].dt.dayofweek
-            df['month'] = df['timestamp'].dt.month
-            df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
+    #         # Add time features
+    #         df['hour'] = df['timestamp'].dt.hour
+    #         df['day_of_week'] = df['timestamp'].dt.dayofweek
+    #         df['month'] = df['timestamp'].dt.month
+    #         df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
             
-            return df
+    #         return df
             
-        except Exception as e:
-            print(f"Error fetching weather data: {e}")
-            return self._generate_synthetic_weather()
+    #     except Exception as e:
+    #         print(f"Error fetching weather data: {e}")
+    #         return self._generate_synthetic_weather()
     
-    def _generate_synthetic_weather(self) -> pd.DataFrame:
-        """Generate synthetic weather data for testing"""
-        dates = pd.date_range(start=datetime.now(), periods=168, freq='H')
-        
+    def _generate_synthetic_weather(self, target_index: Optional[pd.DatetimeIndex] = None) -> pd.DataFrame:
+        """Generate synthetic weather data for testing, aligned to the target_index if provided."""
+        if target_index is not None:
+            dates = target_index
+        else:
+            dates = pd.date_range(start=datetime.now(), periods=168, freq='H')
+
         # Synthetic temperature profile (daily cycle + seasonal trend)
         base_temp = 15 + 10 * np.sin(2 * np.pi * dates.hour / 24) + 5 * np.sin(2 * np.pi * dates.dayofyear / 365)
         temperature = base_temp + np.random.normal(0, 2, len(dates))
-        
-        return pd.DataFrame({
+
+        df = pd.DataFrame({
             'timestamp': dates,
             'temperature': temperature,
             'humidity': 60 + np.random.normal(0, 10, len(dates)),
@@ -90,8 +93,10 @@ class AgentAHeatForecast:
             'hour': dates.hour,
             'day_of_week': dates.dayofweek,
             'month': dates.month,
-            'is_weekend': dates.dayofweek.isin([5, 6]).astype(int)
+            'is_weekend': pd.Series(dates).dt.dayofweek.isin([5, 6]).astype(int).values
         })
+        df = df.set_index('timestamp')
+        return df
     
     def _generate_synthetic_heat_demand(self, weather_df: pd.DataFrame) -> pd.Series:
         """Generate synthetic heat demand based on weather and time patterns"""
@@ -107,10 +112,83 @@ class AgentAHeatForecast:
         # Random variation
         noise = np.random.normal(0, 20, len(weather_df))
         
+
         demand = (base_demand * weekend_factor * temp_factor + noise).clip(50, 500)
         return pd.Series(demand, index=weather_df.index)
+
+    def get_weather_data(self, heat_demand: pd.DataFrame, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
+        """
+        Fetch weather data for the same time range and resolution as the heat_demand DataFrame.
+        Assumes heat_demand has a DateTimeIndex or a 'timestamp' column.
+        """
+        # Determine time range
+        if isinstance(heat_demand.index, pd.DatetimeIndex):
+            start = heat_demand.index.min()
+            end = heat_demand.index.max()
+            if isinstance(start, pd.Timestamp) and isinstance(end, pd.Timestamp):
+                if pd.isna(start) or pd.isna(end):
+                    raise ValueError("heat_demand index has no valid timestamps.")
+            else:
+                raise ValueError("heat_demand index min/max did not return a Timestamp.")
+            target_index = heat_demand.index
+        elif 'timestamp' in heat_demand.columns:
+            timestamps = pd.to_datetime(heat_demand['timestamp'])
+            start = timestamps.min()
+            end = timestamps.max()
+            if isinstance(start, pd.Timestamp) and isinstance(end, pd.Timestamp):
+                if pd.isna(start) or pd.isna(end):
+                    raise ValueError("heat_demand['timestamp'] has no valid timestamps.")
+            else:
+                raise ValueError("heat_demand['timestamp'] min/max did not return a Timestamp.")
+            target_index = timestamps
+        else:
+            raise ValueError("heat_demand must have a DateTimeIndex or a 'timestamp' column.")
+
+        url = "https://archive-api.open-meteo.com/v1/archive"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
+            "start_date": start.strftime('%Y-%m-%d'),
+            "end_date": end.strftime('%Y-%m-%d'),
+            "timezone": "Europe/Berlin"
+        }
+
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            weather_df = pd.DataFrame({
+                'timestamp': pd.to_datetime(data['hourly']['time']),
+                'temperature': data['hourly']['temperature_2m'],
+                'humidity': data['hourly']['relative_humidity_2m'],
+                'wind_speed': data['hourly']['wind_speed_10m'],
+                'precipitation': data['hourly']['precipitation']
+            }).set_index('timestamp')
+            
+
+            # Resample/interpolate to 15-min intervals using '15min' instead of '15T'
+            weather_15min = weather_df.resample('15min').interpolate('linear')
+
+            # Align to heat_demand's timestamps
+            weather_aligned = weather_15min.reindex(target_index, method='nearest')
+
+            # Add time features if needed
+            weather_aligned['hour'] = weather_aligned.index.hour
+            weather_aligned['day_of_week'] = weather_aligned.index.dayofweek
+            weather_aligned['month'] = weather_aligned.index.month
+            weather_aligned['is_weekend'] = weather_aligned['day_of_week'].isin([5, 6]).astype(int)
+
+            return weather_aligned
+
+        except Exception as e:
+            print(f"Error fetching weather data: {e}")
+            # Ensure target_index is a DatetimeIndex
+            if not isinstance(target_index, pd.DatetimeIndex):
+                target_index = pd.DatetimeIndex(target_index)
+            return self._generate_synthetic_weather(target_index=target_index)
     
-    def prepare_data(self, weather_df: pd.DataFrame, heat_demand: pd.Series = None) -> Tuple[np.ndarray, np.ndarray]:
+    def prepare_data(self, weather_df: pd.DataFrame, heat_demand: Optional[pd.Series] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Prepare data for training"""
         if heat_demand is None:
             heat_demand = self._generate_synthetic_heat_demand(weather_df)
@@ -129,6 +207,8 @@ class AgentAHeatForecast:
             y.append(targets[i:i+24])
         
         return np.array(X), np.array(y)
+
+
     
     def train_lstm(self, X: np.ndarray, y: np.ndarray, epochs: int = 100):
         """Train LSTM model"""
@@ -179,10 +259,9 @@ class AgentAHeatForecast:
         )
         self.model.fit(df_prophet)
     
-    def train(self, weather_df: pd.DataFrame, heat_demand: pd.Series = None):
+    def train(self, weather_df: pd.DataFrame, heat_demand: Optional[pd.Series] = None):
         """Train the forecasting model"""
         print(f"Training {self.model_type.upper()} model...")
-        
         if self.model_type == "lstm":
             X, y = self.prepare_data(weather_df, heat_demand)
             self.train_lstm(X, y)
@@ -192,8 +271,12 @@ class AgentAHeatForecast:
         elif self.model_type == "prophet":
             if heat_demand is None:
                 heat_demand = self._generate_synthetic_heat_demand(weather_df)
-            self.train_prophet(weather_df['timestamp'], heat_demand)
-        
+            # Ensure timestamps is a DatetimeIndex
+            if isinstance(weather_df.index, pd.DatetimeIndex):
+                timestamps = weather_df.index
+            else:
+                timestamps = pd.DatetimeIndex(pd.to_datetime(weather_df['timestamp']))
+            self.train_prophet(timestamps, heat_demand)
         self.is_trained = True
         print("Training completed!")
     
@@ -267,4 +350,6 @@ if __name__ == "__main__":
         'timestamp': pd.date_range(start=datetime.now(), periods=24, freq='H'),
         'heat_demand_forecast': forecast
     })
-    forecast_df.to_csv('data/heat_demand_forecast.csv', index=False)
+    forecast_df.to_csv('DATA/heat_demand_forecast.csv', index=False)
+
+
