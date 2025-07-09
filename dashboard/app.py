@@ -167,21 +167,30 @@ try:
         'Zeit': timestamps,
         'PV-Leistung (kW)': pv_pred
     })
-    st.write("Länge timestamps:", len(timestamps))
-    st.write("Länge pv_pred:", len(pv_pred))
-    st.write("Typ pv_pred:", type(pv_pred))
-    st.write("Typ df_pv['PV-Leistung (kW)']:", df_pv['PV-Leistung (kW)'].dtype)
-    df_pv['PV-Leistung (kW)'] = df_pv['PV-Leistung (kW)'].astype(float)
-    df_pv = df_pv.sort_values('Zeit')
-    # PV-Graphik direkt aus der Tabelle erzeugen
-    import plotly.graph_objects as go
-    fig_pv = go.Figure()
-    fig_pv.add_trace(go.Scatter(x=df_pv['Zeit'], y=df_pv['PV-Leistung (kW)'], mode='lines+markers', name='PV-Output (kW)', line=dict(color='gold', width=2)))
-    fig_pv.update_layout(title="PV-Leistungsvorhersage (24h)", xaxis_title="Zeit", yaxis_title="PV-Leistung (kW)", height=400)
-    st.plotly_chart(fig_pv, use_container_width=True)
     st.dataframe(df_pv, use_container_width=True)
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
+
+# Stromverbrauchsprognose (Gesamt) anzeigen
+import pandas as pd
+try:
+    df_strom = pd.read_csv("data/electricity_forecast.csv", parse_dates=['Zeit'])
+    st.header("🔌 Stromverbrauchsprognose (Gesamt)")
+    # Visualisierung
+    import plotly.graph_objects as go
+    fig_strom = go.Figure()
+    fig_strom.add_trace(go.Scatter(
+        x=df_strom['Zeit'],
+        y=df_strom.iloc[:, 1],  # Annahme: 2. Spalte ist Prognosewert
+        mode='lines+markers',
+        name='Stromverbrauch Prognose (kWh)',
+        line=dict(color='blue', width=2)
+    ))
+    fig_strom.update_layout(title="Stromverbrauchsprognose (Gesamt)", xaxis_title="Zeit", yaxis_title="Stromverbrauch Prognose (kWh)", height=400)
+    st.plotly_chart(fig_strom, use_container_width=True)
+    st.dataframe(df_strom, use_container_width=True)
+except Exception as e:
+    st.warning(f"Konnte Stromverbrauchsprognose nicht laden: {e}")
 
 
 def main():
