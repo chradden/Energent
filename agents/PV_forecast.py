@@ -2,13 +2,21 @@ import polars as pl
 import requests
 import os
 from suncalc import get_position
+from xgboost import XGBRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from datetime import date, datetime, timedelta  
+import numpy as np
 
 class PVForecaster:
     def __init__(self, latitude: float, longitude: float):
         self.data = []
         self.model = None
+        self.model_mse = None
         self.latitude = latitude
         self.longitude = longitude
+        self.weather_variables = ["direct_radiation", "cloud_cover"]
+        self.timezone="Europe/Berlin"
         
     def prepare_data(self, path_to_pv_data: str):
         ## run this only once to prepare data
@@ -37,8 +45,7 @@ class PVForecaster:
         ## get weather data from open-meteo
         start_date = df["date_time"].to_list()[0]
         end_date = df["date_time"].to_list()[-1]
-        variables = ["direct_radiation", "cloud_cover"]
-        weather = self.get_houly_weather(self.latitude, self.longitude, start_date, end_date, variables)
+        weather = self.get_houly_weather(self.latitude, self.longitude, start_date, end_date, self.weather_variables)
         weather_df = pl.from_dict(weather)
         weather_df = weather_df.with_columns(pl.col("time").str.to_datetime())
         ## merge df with weather data
@@ -48,7 +55,7 @@ class PVForecaster:
         df.write_csv(f"{folder}/PV-prepared.csv")
         
             
-    def get_houly_weather(self, lat: float, lon: float, start_date, end_date, variables: list, timezone="Europe/Berlin"):
+    def get_houly_weather(self, lat: float, lon: float, start_date, end_date, variables: list):
         url = "https://archive-api.open-meteo.com/v1/archive"
         params = {
             "latitude": lat,
@@ -56,7 +63,7 @@ class PVForecaster:
             "hourly": ",".join(variables),
             "start_date": start_date.strftime('%Y-%m-%d'),
             "end_date": end_date.strftime('%Y-%m-%d'),
-            "timezone": timezone
+            "timezone": self.timezone
         }
         response = requests.get(url, params=params)
         data = response.json()
@@ -65,28 +72,113 @@ class PVForecaster:
             weather[var] = data["hourly"][var]
         return weather
         
-    # def read_data(self, path_to_pv_data):
-    #     df = pd.read_csv(path_to_pv_data, sep=";")
-    #     df["date_time"] = pd.to_datetime(df["date_time"], format="%d.%m.%Y %H:%M")
-    #     df.set_index("date_time", inplace=True)
-    #     # df["pv_electricity(kW)"] = pd.to_numeric(df["pv_electricity(kW)"])
-    #     # df = df.resample('h').mean()
-    #     self.data = df
-    #     return df
+    def read_prepared_data(self, path_to_data_file):
+        # test for prepared data file, create when not there
+        folder = os.path.dirname(orig_file_path)
+        if not os.path.exists(f"{folder}/PV-prepared.csv"):
+            print("no prepared data set found. use .prepare_data(original_data_file_path) method to prepare the data set.")
+        else:
+            self.data = pl.read_csv(path_to_data_file)
+            
+    def train_xgboost(self):
+        # XGBoost model training logic here
+        
+        # check if data loaded
+        if not isinstance(self.data, pl.DataFrame):
+            print("No data available for training.")
+            return None
+        
+        # Prepare the dataset for XGBoost
+        cols = self.data.columns
+        cols.remove("date_time")
+        cols.remove("pv_electricity(kW)")
+        features = self.data[cols]
+        target = self.data["pv_electricity(kW)"]
+        
+        # Split the dataset into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.3, random_state=42)
+        
+        # train model
+        xgb_model = XGBRegressor()
+        xgb_model.fit(X_train, y_train)
+        self.model = xgb_model
+        
+        # evaluate
+        y_pred = xgb_model.predict(X_test) 
+        mse = mean_squared_error(y_test, y_pred)
+        self.model_mse = mse
     
+    def predict_next_day(self):
+        # get weather and other stuff
+        weather = self.weather_forecast(self.latitude, self.longitude, self.weather_variables)
+        df = pl.from_dict(weather)
+        df = df.with_columns(pl.col("time").str.to_datetime())
+        ## get sun position for each hour and add to the dataframe
+        df = df.with_columns(
+            pl.col("time").map_elements(lambda x: get_position(x, lng=self.longitude, lat=self.latitude)).alias("sun_position")
+        )
+        df = df.with_columns(
+            pl.col("sun_position").struct.unnest()
+        )
+        df = df.drop(["sun_position"])
+        ## add our and week
+        df = df.with_columns(
+            pl.col("time").dt.week().alias("week"),
+            pl.col("time").dt.hour().alias("hour")
+        )
+        df = df.drop("time")
+        # reorder
+        df = df.select(
+            pl.col("azimuth"),
+            pl.col("altitude"),
+            pl.col("week"),
+            pl.col("hour"),
+            pl.col("direct_radiation"),
+            pl.col("cloud_cover")
+        )
+        y_pred = self.model.predict(df)
+        return y_pred
+    
+    def weather_forecast(self, lat: float, lon: float, variables: list):
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": ",".join(variables),
+            "forecast_days": 1,
+            "timezone": self.timezone
+        }
+        response = requests.get(url, params=params)
+        data = response.json()
+        weather = dict()
+        for var in data["hourly"].keys():
+            weather[var] = data["hourly"][var]
+        return weather
+
 
 
 if __name__ == "__main__":
     lat= 53.5511
     lon= 9.9937
     orig_file_path = "data/historical_Data/PV-electricity_2024_01_01.csv"
+    folder = os.path.dirname(orig_file_path)
+    prep_file_path = folder + "/PV-prepared.csv"
     
     pv_forecast = PVForecaster(latitude=lat, longitude=lon)
     
     # test for prepared data file, create when not there
     folder = os.path.dirname(orig_file_path)
-    if not os.path.exists(f"{folder}/PV-prepared.csv"):
+    if not os.path.exists(prep_file_path):
         print("preparing data set")
-        df = pv_forecast.prepare_data(orig_file_path)
+        pv_forecast.prepare_data(orig_file_path)
     else:
         print("found prepared data. continuing...")
+    # read data file
+    pv_forecast.read_prepared_data(prep_file_path)
+    # train xgb model
+    pv_forecast.train_xgboost()
+    print("XGBoost model trained successfully.")
+    print("Model evaluation:")
+    print(f"mse: {pv_forecast.model_mse}")
+    print(pv_forecast.predict_next_day())
+    
