@@ -74,8 +74,7 @@ class PVForecaster:
         
     def read_prepared_data(self, path_to_data_file):
         # test for prepared data file, create when not there
-        folder = os.path.dirname(orig_file_path)
-        if not os.path.exists(f"{folder}/PV-prepared.csv"):
+        if not os.path.exists(path_to_data_file):
             print("no prepared data set found. use .prepare_data(original_data_file_path) method to prepare the data set.")
         else:
             self.data = pl.read_csv(path_to_data_file)
@@ -94,7 +93,10 @@ class PVForecaster:
         cols.remove("pv_electricity(kW)")
         features = self.data[cols]
         target = self.data["pv_electricity(kW)"]
-        
+        print("[DEBUG] Trainings-Features (X):")
+        print(features.head(24))
+        print("[DEBUG] Zielwerte (y):")
+        print(target.head(24))
         # Split the dataset into training and testing sets
         X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.3, random_state=42)
         
@@ -107,6 +109,7 @@ class PVForecaster:
         y_pred = xgb_model.predict(X_test) 
         mse = mean_squared_error(y_test, y_pred)
         self.model_mse = mse
+        print(f"[DEBUG] Modellgüte (MSE): {mse}")
     
     def predict_next_day(self):
         # get weather and other stuff
@@ -136,7 +139,11 @@ class PVForecaster:
             pl.col("direct_radiation"),
             pl.col("cloud_cover")
         )
+        print("[DEBUG] Features für Vorhersage (next day):")
+        print(df.head(24))
         y_pred = self.model.predict(df)
+        print("[DEBUG] Vorhersage (y_pred):")
+        print(y_pred[:24])
         return y_pred
     
     def weather_forecast(self, lat: float, lon: float, variables: list):

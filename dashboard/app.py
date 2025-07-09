@@ -19,6 +19,9 @@ from agents.agent_c_optimizer_lp import *
 from agents.agent_c_optimizer_rl import *
 from simulations.agent_d_simulation import *
 
+# PV-Forecast importieren
+from agents.PV_forecast import PVForecaster
+
 # Page configuration
 st.set_page_config(
     page_title="ENERGENT - CHP Optimization Dashboard",
@@ -132,6 +135,46 @@ st.sidebar.metric("Spezifische Kosten Heizstab [€/kWh]", f"{cost_heating_rod:.
 st.sidebar.metric("Spezifische Kosten Wärmepumpe [€/kWh]", f"{cost_heatpump:.3f}")
 st.sidebar.metric("Spezifische Kosten BHKW [€/kWh]", f"{cost_CHP:.3f}")
 st.sidebar.metric("Strompreis (dynamisch, all-in) [ct/kWh]", f"{np.mean(electricity_price_dynamic):.2f}")
+
+# Sidebar: Koordinaten für PV-Anlage
+st.sidebar.header("PV-Anlage (Photovoltaik)")
+pv_lat = st.sidebar.number_input("Breitengrad (Latitude)", min_value=-90.0, max_value=90.0, value=53.5511, step=0.0001, format="%.4f")
+pv_lon = st.sidebar.number_input("Längengrad (Longitude)", min_value=-180.0, max_value=180.0, value=9.9937, step=0.0001, format="%.4f")
+
+# PV-Vorhersage berechnen und visualisieren
+st.header("☀️ PV-Leistungsvorhersage für morgen")
+try:
+    pv_forecaster = PVForecaster(latitude=pv_lat, longitude=pv_lon)
+    orig_file_path = "data/historical_Data/PV-electricity_2024_01_01.csv"  # Passe ggf. an
+    prep_file_path = "data/historical_Data/PV-prepared.csv"
+    # Datenpräparation, falls nötig
+    if not os.path.exists(prep_file_path):
+        st.info("PV-Daten werden vorbereitet...")
+        pv_forecaster.prepare_data(orig_file_path)
+        st.success("PV-Datenpräparation abgeschlossen.")
+    # Daten laden und Modell trainieren
+    pv_forecaster.read_prepared_data(prep_file_path)
+    pv_forecaster.train_xgboost()
+    st.info(f"Modellgüte (MSE): {pv_forecaster.model_mse}")
+    pv_pred = pv_forecaster.predict_next_day()
+    # Zeitachse für morgen generieren
+    cet = pytz.timezone('Europe/Berlin')
+    tomorrow = (datetime.now(cet) + timedelta(days=1)).date()
+    timestamps = [datetime.combine(tomorrow, datetime.min.time()) + timedelta(hours=h) for h in range(24)]
+    import plotly.graph_objects as go
+    fig_pv = go.Figure()
+    fig_pv.add_trace(go.Scatter(x=timestamps, y=pv_pred, mode='lines+markers', name='PV-Output (kW)', line=dict(color='gold', width=2)))
+    fig_pv.update_layout(title="PV-Leistungsvorhersage (24h)", xaxis_title="Zeit", yaxis_title="PV-Leistung (kW)", height=400)
+    st.plotly_chart(fig_pv, use_container_width=True)
+    # Tabelle mit PV-Vorhersagewerten anzeigen
+    import pandas as pd
+    df_pv = pd.DataFrame({
+        'Zeit': timestamps,
+        'PV-Leistung (kW)': pv_pred
+    })
+    st.dataframe(df_pv, use_container_width=True)
+except Exception as e:
+    st.error(f"Fehler bei der PV-Vorhersage: {e}")
 
 
 def main():
