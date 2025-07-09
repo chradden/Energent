@@ -22,6 +22,9 @@ from simulations.agent_d_simulation import *
 # PV-Forecast importieren
 from agents.PV_forecast import PVForecaster
 
+# Electricity Forecast importieren
+from agents.agent_d_electricity_forecast import get_electricity_forecast
+
 # Page configuration
 st.set_page_config(
     page_title="ENERGENT - CHP Optimization Dashboard",
@@ -136,10 +139,18 @@ st.sidebar.metric("Spezifische Kosten Wärmepumpe [€/kWh]", f"{cost_heatpump:.
 st.sidebar.metric("Spezifische Kosten BHKW [€/kWh]", f"{cost_CHP:.3f}")
 st.sidebar.metric("Strompreis (dynamisch, all-in) [ct/kWh]", f"{np.mean(electricity_price_dynamic):.2f}")
 
-# Sidebar: Koordinaten für PV-Anlage
-st.sidebar.header("PV-Anlage (Photovoltaik)")
-pv_lat = st.sidebar.number_input("Breitengrad (Latitude)", min_value=-90.0, max_value=90.0, value=53.5511, step=0.0001, format="%.4f")
-pv_lon = st.sidebar.number_input("Längengrad (Longitude)", min_value=-180.0, max_value=180.0, value=9.9937, step=0.0001, format="%.4f")
+# Sidebar: Koordinaten für PV-Anlage und Elektrizitätsprognose
+st.sidebar.header("Standort & Prognose")
+pv_lat = st.sidebar.number_input("Breitengrad (Latitude)", min_value=-90.0, max_value=90.0, value=54.3233, step=0.0001, format="%.4f")
+pv_lon = st.sidebar.number_input("Längengrad (Longitude)", min_value=-180.0, max_value=180.0, value=10.1228, step=0.0001, format="%.4f")
+
+# Elektrizitätsprognose Parameter
+st.sidebar.header("Elektrizitätsprognose")
+electricity_csv_path = st.sidebar.text_input(
+    "CSV-Pfad für Elektrizitätsdaten", 
+    value="data/electricity consumption_2024-01-01.csv",
+    help="Pfad zur CSV-Datei mit historischen Elektrizitätsverbrauchsdaten"
+)
 
 # PV-Vorhersage berechnen und visualisieren
 st.header("☀️ PV-Leistungsvorhersage für morgen")
@@ -171,26 +182,65 @@ try:
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
 
-# Stromverbrauchsprognose (Gesamt) anzeigen
-import pandas as pd
+# Elektrizitätsverbrauchsprognose mit LSTM-Modell
+st.header("🔌 Elektrizitätsverbrauchsprognose (LSTM-Modell)")
+
 try:
-    df_strom = pd.read_csv("data/electricity_forecast.csv", parse_dates=['Zeit'])
-    st.header("🔌 Stromverbrauchsprognose (Gesamt)")
-    # Visualisierung
-    import plotly.graph_objects as go
-    fig_strom = go.Figure()
-    fig_strom.add_trace(go.Scatter(
-        x=df_strom['Zeit'],
-        y=df_strom.iloc[:, 1],  # Annahme: 2. Spalte ist Prognosewert
-        mode='lines+markers',
-        name='Stromverbrauch Prognose (kWh)',
-        line=dict(color='blue', width=2)
-    ))
-    fig_strom.update_layout(title="Stromverbrauchsprognose (Gesamt)", xaxis_title="Zeit", yaxis_title="Stromverbrauch Prognose (kWh)", height=400)
-    st.plotly_chart(fig_strom, use_container_width=True)
-    st.dataframe(df_strom, use_container_width=True)
+    with st.spinner("Elektrizitätsprognose wird berechnet..."):
+        # LSTM-basierte Prognose durchführen
+        forecast_df = get_electricity_forecast(
+            csv_path=electricity_csv_path,
+            lat=pv_lat,
+            lon=pv_lon,
+            forecast_hours=24
+        )
+    
+    if not forecast_df.empty:
+        st.success("✅ Elektrizitätsprognose erfolgreich berechnet!")
+        
+        # Plotly-Visualisierung
+        fig_electricity = go.Figure()
+        fig_electricity.add_trace(go.Scatter(
+            x=forecast_df.index,
+            y=forecast_df['forecasted_consumption_kwh'],
+            mode='lines+markers',
+            name='Prognostizierter Verbrauch (kWh)',
+            line=dict(color='red', width=2),
+            marker=dict(size=6)
+        ))
+        
+        fig_electricity.update_layout(
+            title="Elektrizitätsverbrauchsprognose (LSTM-Modell)",
+            xaxis_title="Zeit",
+            yaxis_title="Prognostizierter Verbrauch (kWh)",
+            height=400,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig_electricity, use_container_width=True)
+        
+        # Tabelle mit Prognosewerten
+        st.subheader("Prognosewerte")
+        display_df = forecast_df.reset_index()
+        display_df.columns = ['Zeitstempel', 'Prognostizierter Verbrauch (kWh)']
+        display_df['Prognostizierter Verbrauch (kWh)'] = display_df['Prognostizierter Verbrauch (kWh)'].round(3)
+        st.dataframe(display_df, use_container_width=True)
+        
+        # Statistiken
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Durchschnittlicher Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].mean():.2f} kWh")
+        with col2:
+            st.metric("Maximaler Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].max():.2f} kWh")
+        with col3:
+            st.metric("Minimaler Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].min():.2f} kWh")
+            
+    else:
+        st.error("❌ Elektrizitätsprognose konnte nicht berechnet werden.")
+        
 except Exception as e:
-    st.warning(f"Konnte Stromverbrauchsprognose nicht laden: {e}")
+    st.error(f"❌ Fehler bei der Elektrizitätsprognose: {str(e)}")
+    st.info("💡 Stellen Sie sicher, dass die CSV-Datei existiert und das korrekte Format hat.")
 
 
 def main():
