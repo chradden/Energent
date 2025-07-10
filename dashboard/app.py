@@ -418,7 +418,8 @@ def main():
             run_optimization(heat_model, opt_method, 
                            chp_power_max, chp_heat_max, boiler_max, 
                            storage_capacity, fuel_price,
-                           battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss)
+                           battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss,
+                           pv_lat, pv_lon, electricity_csv_path)
     
     # Main content
     col1, col2 = st.columns([2, 1])
@@ -565,7 +566,8 @@ def main():
 def run_optimization(heat_model, opt_method, 
                     chp_power_max, chp_heat_max, boiler_max, 
                     storage_capacity, fuel_price,
-                    battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
+                    battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss,
+                    pv_lat, pv_lon, electricity_csv_path):
     """Run the complete optimization pipeline"""
     
     with st.spinner("🔄 Running optimization pipeline..."):
@@ -582,10 +584,11 @@ def run_optimization(heat_model, opt_method,
         st.info("Step 2: Running optimization...")
         
         if opt_method == "Linear Programming":
-            results = run_lp_optimization(heat_forecast, price_forecast, 
-                                        chp_power_max, chp_heat_max, boiler_max, 
-                                        storage_capacity, fuel_price,
-                                        battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss)
+            results = run_extended_lp_optimization(
+                heat_forecast, price_forecast, pv_forecast, electricity_forecast, weather_data,
+                chp_power_max, chp_heat_max, boiler_max, storage_capacity, fuel_price,
+                battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss
+            )
         else:
             results = run_rl_optimization(heat_forecast, price_forecast, 
                                         chp_power_max, chp_heat_max, boiler_max, 
@@ -603,10 +606,80 @@ def run_optimization(heat_model, opt_method,
         
         st.success("✅ Optimization completed!")
 
-def run_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
+def run_extended_lp_optimization(heat_demand, elec_price, pv_generation, electricity_demand, weather_data,
+                                chp_power_max, chp_heat_max, boiler_max, storage_capacity, fuel_price,
+                                battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
+    """Run Extended Linear Programming optimization using ExtendedCHPOptimizer"""
+    
+    try:
+        # Initialize the ExtendedCHPOptimizer
+        optimizer = ExtendedCHPOptimizer()
+        
+        # Create parameters dictionary for the optimizer
+        # Note: The optimizer will use its own parameters from the JSON file, but we can override some
+        # The optimizer expects specific parameter structure from its JSON file
+        
+        # Run optimization with all forecasts
+        results = optimizer.optimize_24h_schedule(
+            heat_demand=heat_demand,
+            electricity_prices=elec_price,
+            pv_generation=pv_generation,
+            weather_data=weather_data
+        )
+        
+        if results['status'] == 'optimal':
+            st.success("✅ Extended optimization completed successfully!")
+            
+            # Convert results to the expected format for the dashboard
+            return {
+                'method': 'Extended Linear Programming',
+                'total_profit': results['summary']['total_profit'],
+                'total_revenue': results['summary']['total_revenue'],
+                'total_cost': results['summary']['total_cost'],
+                'chp_power': results['chp_power'],
+                'chp_heat': results['chp_heat'],
+                'boiler_heat': results['boiler_heat'],
+                'storage': results['thermal_level'],
+                'charge': results['thermal_charge'],
+                'discharge': results['thermal_discharge'],
+                'pv_generation': results['pv_generation'] if 'pv_generation' in results else pv_generation,
+                'battery_level': results['battery_level'],
+                'battery_charge': results['battery_charge'],
+                'battery_discharge': results['battery_discharge'],
+                'heat_pump_usage': results['heat_pump_heat'],
+                'electric_heater_usage': results['electric_heater_heat'],
+                'storage_losses': [storage_loss] * 24,
+                'grid_import': results['grid_import'],
+                'grid_export': results['grid_export'],
+                'chp_on': results['chp_on'],
+                'boiler_on': results['boiler_on'],
+                'heat_pump_on': results['heat_pump_on'],
+                'objective_value': results['objective_value'],
+                'status': 'optimal'
+            }
+        else:
+            st.error(f"❌ Extended optimization failed: {results.get('error', 'Unknown error')}")
+            # Fallback to simplified optimization
+            return run_simplified_lp_optimization(
+                heat_demand, elec_price, chp_power_max, chp_heat_max, boiler_max, 
+                storage_capacity, fuel_price, battery_capacity, battery_charge_rate, 
+                pv_peak_power, electric_heater_max, heat_pump_max, storage_loss
+            )
+            
+    except Exception as e:
+        st.error(f"❌ Error in extended optimization: {str(e)}")
+        st.info("🔄 Falling back to simplified optimization...")
+        # Fallback to simplified optimization
+        return run_simplified_lp_optimization(
+            heat_demand, elec_price, chp_power_max, chp_heat_max, boiler_max, 
+            storage_capacity, fuel_price, battery_capacity, battery_charge_rate, 
+            pv_peak_power, electric_heater_max, heat_pump_max, storage_loss
+        )
+
+def run_simplified_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
                        boiler_max, storage_capacity, fuel_price,
                        battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
-    """Run Linear Programming optimization (erweitert)"""
+    """Run simplified Linear Programming optimization (fallback)"""
     hours = range(24)
     # Dummy-Zeitreihen für neue Komponenten (hier: einfache Profile, später LP-Integration)
     pv_generation = [pv_peak_power * max(0, np.sin(np.pi * (t-6)/12)) for t in hours]
@@ -629,7 +702,7 @@ def run_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max,
     total_profit = sum([elec_price[t]*P_CHP[t] - fuel_price*(P_CHP[t]+Q_CHP[t])/0.85 - fuel_price*Q_boiler[t]/0.9 for t in hours])
 
     return {
-        'method': 'Linear Programming',
+        'method': 'Simplified Linear Programming (Fallback)',
         'total_profit': total_profit,
         'chp_power': P_CHP,
         'chp_heat': Q_CHP,
@@ -645,6 +718,16 @@ def run_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max,
         'electric_heater_usage': electric_heater_usage,
         'storage_losses': storage_losses
     }
+
+def run_lp_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
+                       boiler_max, storage_capacity, fuel_price,
+                       battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss):
+    """Legacy function - now redirects to extended optimization"""
+    return run_extended_lp_optimization(
+        heat_demand, elec_price, [], [], [],  # Empty PV, electricity demand, weather for backward compatibility
+        chp_power_max, chp_heat_max, boiler_max, storage_capacity, fuel_price,
+        battery_capacity, battery_charge_rate, pv_peak_power, electric_heater_max, heat_pump_max, storage_loss
+    )
 
 def run_rl_optimization(heat_demand, elec_price, chp_power_max, chp_heat_max, 
                        boiler_max, storage_capacity, fuel_price):
@@ -748,6 +831,7 @@ def display_forecasts(forecasts):
     """Display forecast charts"""
     st.header("📈 Forecasts")
     
+    # Create 2x2 grid for all forecasts
     col1, col2 = st.columns(2)
     
     with col1:
@@ -767,12 +851,31 @@ def display_forecasts(forecasts):
             height=400
         )
         st.plotly_chart(fig_heat, use_container_width=True)
+        
+        # PV generation forecast
+        if 'pv' in forecasts:
+            fig_pv = go.Figure()
+            timestamps = forecasts.get('price_timestamps', list(range(24)))
+            fig_pv.add_trace(go.Scatter(
+                x=timestamps,
+                y=forecasts['pv'],
+                mode='lines+markers',
+                name='PV Generation',
+                line=dict(color='orange', width=2)
+            ))
+            fig_pv.update_layout(
+                title="24-Hour PV Generation Forecast",
+                xaxis_title="Time",
+                yaxis_title="PV Generation (kW)",
+                height=400
+            )
+            st.plotly_chart(fig_pv, use_container_width=True)
     
     with col2:
         # Electricity price forecast
         fig_price = go.Figure()
         fig_price.add_trace(go.Scatter(
-            x=forecasts['timestamps'],
+            x=forecasts['price_timestamps'],
             y=forecasts['price'],
             mode='lines+markers',
             name='Electricity Price',
@@ -785,6 +888,25 @@ def display_forecasts(forecasts):
             height=400
         )
         st.plotly_chart(fig_price, use_container_width=True)
+        
+        # Electricity consumption forecast
+        if 'electricity' in forecasts:
+            fig_elec = go.Figure()
+            timestamps = forecasts.get('price_timestamps', list(range(24)))
+            fig_elec.add_trace(go.Scatter(
+                x=timestamps,
+                y=forecasts['electricity'],
+                mode='lines+markers',
+                name='Electricity Consumption',
+                line=dict(color='green', width=2)
+            ))
+            fig_elec.update_layout(
+                title="24-Hour Electricity Consumption Forecast",
+                xaxis_title="Time",
+                yaxis_title="Electricity Consumption (kWh)",
+                height=400
+            )
+            st.plotly_chart(fig_elec, use_container_width=True)
 
 def display_optimization_results(results):
     """Display optimization results"""
@@ -818,7 +940,7 @@ def display_optimization_results(results):
     # Power generation
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['timestamps'],
+            x=st.session_state.forecasts['price_timestamps'],
             y=results['chp_power'],
             mode='lines+markers',
             name='CHP Power',
@@ -830,7 +952,7 @@ def display_optimization_results(results):
     # Heat generation
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['timestamps'],
+            x=st.session_state.forecasts['price_timestamps'],
             y=results['chp_heat'],
             mode='lines+markers',
             name='CHP Heat',
@@ -841,7 +963,7 @@ def display_optimization_results(results):
     
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['timestamps'],
+            x=st.session_state.forecasts['price_timestamps'],
             y=results['boiler_heat'],
             mode='lines+markers',
             name='Boiler Heat',
@@ -860,7 +982,7 @@ def display_optimization_results(results):
         # Storage level
         fig_storage = go.Figure()
         fig_storage.add_trace(go.Scatter(
-            x=st.session_state.forecasts['timestamps'],
+            x=st.session_state.forecasts['price_timestamps'],
             y=results['storage'],
             mode='lines+markers',
             name='Storage Level',
@@ -892,7 +1014,7 @@ def display_optimization_results(results):
 
     # Nach den bisherigen Plots:
     if 'pv_generation' in results:
-        display_component_time_series(results, st.session_state.forecasts['timestamps'])
+        display_component_time_series(results, st.session_state.forecasts['price_timestamps'])
 
 def display_component_time_series(results, timestamps):
     """Zeige Zeitreihen für alle Komponenten als Tabs"""
