@@ -215,6 +215,55 @@ try:
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
 
+# --- HEAT DEMAND FORECAST (Agent A) ---
+if (
+    'forecasts' not in st.session_state
+    or st.session_state['forecasts'] is None
+    or not isinstance(st.session_state['forecasts'], dict)
+    or 'heat' not in st.session_state['forecasts']
+):
+    st.info('Now running heat forecast (Agent A)...')
+    heat_csv_path = 'data/historical_Data/Gas usage combined_2024-01-01s.csv'
+    agent_a = AgentAHeatForecast(model_type='lstm')
+    agent_a.try_load_or_train(heat_csv_path, lat=pv_lat, lon=pv_lon)
+    heat_forecast_df = agent_a.predict_next_7_days(lat=pv_lat, lon=pv_lon)
+    heat_forecast = heat_forecast_df['heat_demand_forecast'].tolist()
+    heat_timestamps = heat_forecast_df['timestamp'].tolist()
+    st.session_state['forecasts'] = {}  # Always set to dict here
+    st.session_state['forecasts']['heat'] = heat_forecast
+    st.session_state['forecasts']['heat_timestamps'] = heat_timestamps
+    st.session_state['forecasts']['timestamps'] = heat_timestamps  # Use same timestamps for now
+    st.session_state['forecasts']['price'] = [0.25] * len(heat_forecast)  # Placeholder price
+
+# --- PRICE FORECAST (Agent B) ---
+if (
+    'forecasts' not in st.session_state
+    or st.session_state['forecasts'] is None
+    or not isinstance(st.session_state['forecasts'], dict)
+    or 'price' not in st.session_state['forecasts']
+    or st.session_state['forecasts']['price'] == [0.25] * len(st.session_state['forecasts']['heat'])  # Check if it's still placeholder
+):
+    st.info('Now running price forecast (Agent B)...')
+    agent_b = AgentBPriceForecast()
+    cet = pytz.timezone('Europe/Berlin')
+    now = datetime.now(cet)
+    tomorrow = (now + timedelta(days=1)).date()
+    price_data = agent_b.get_prices_for_day(tomorrow)
+    
+    if 'date' in price_data.columns and 'value' in price_data.columns:
+        price_data = price_data.rename(columns={'date': 'timestamp', 'value': 'price'})
+    
+    if not price_data.empty and 'timestamp' in price_data.columns and 'price' in price_data.columns:
+        price_data = price_data.sort_values('timestamp')
+        price_forecast = price_data['price'].tolist()
+        price_timestamps = [pd.to_datetime(ts) for ts in price_data['timestamp'].tolist()]
+        
+        # Update forecasts with real price data
+        st.session_state['forecasts']['price'] = price_forecast
+        st.session_state['forecasts']['timestamps'] = price_timestamps
+    else:
+        st.warning("Could not fetch price data, using placeholder values")
+
 # Electricity consumption forecast (XGBoost only)
 st.header("🔌 Electricity Consumption Forecast")
 try:
@@ -521,56 +570,13 @@ def run_optimization(heat_model, opt_method,
     
     with st.spinner("🔄 Running optimization pipeline..."):
         
-        # Step 1: Get forecasts
-        st.info("Step 1: Generating forecasts...")
+        # Step 1: Get forecasts from session state
+        st.info("Step 1: Using pre-generated forecasts...")
         
-        # Agent A - Heat Forecast
-        agent_a = AgentAHeatForecast(model_type=heat_model)
-        # Use relative path for CSV
-        gas_csv_path = 'data/historical_Data/Gas usage combined_2024-01-01s.csv'
-        agent_a.train_from_csv(gas_csv_path)
-        heat_forecast_df = agent_a.predict_next_7_days()
-        heat_forecast = heat_forecast_df['heat_demand_forecast'].tolist()
-        heat_timestamps = heat_forecast_df['timestamp'].tolist()
-        
-        # Agent B - Price Forecast (jetzt: echter Day-Ahead für morgen, 0-24 Uhr)
-        agent_b = AgentBPriceForecast()
-        import pytz
-        cet = pytz.timezone('Europe/Berlin')
-        now = datetime.now(cet)
-        tomorrow = (now + timedelta(days=1)).date()
-        price_data = agent_b.get_prices_for_day(tomorrow)
-        # Spalten ggf. umbenennen
-        if 'date' in price_data.columns and 'value' in price_data.columns:
-            price_data = price_data.rename(columns={'date': 'timestamp', 'value': 'price'})
-        if price_data.empty or 'timestamp' not in price_data.columns or 'price' not in price_data.columns:
-            st.error("Keine Preisdaten für den gewünschten Zeitraum von der smartENERGY API erhalten!")
-            st.info(f"[DEBUG] price_data Inhalt: {price_data}")
-            st.warning("Day-Ahead-Preise für morgen sind erst ab 13:00 Uhr CET verfügbar oder unvollständig!")
-            return
-        price_data = price_data.sort_values('timestamp')
-        price_forecast = price_data['price'].tolist()
-        price_timestamps = price_data['timestamp'].tolist()
-        # Ensure all timestamps are datetime objects
-        import pandas as pd
-        price_timestamps = [pd.to_datetime(ts) for ts in price_timestamps]
-        # Vereinfachte Prüfung: Nur ob DataFrame leer ist
-        if price_data.empty:
-            st.error("Optimierung abgebrochen: Es sind nicht alle 24 Day-Ahead-Preise (0-23h) für morgen verfügbar!")
-            st.info(f"[DEBUG] Preis-Timestamps für morgen: {[str(ts) for ts in price_timestamps]}")
-            st.info(f"[DEBUG] Preise für morgen: {price_forecast}")
-            st.warning("Day-Ahead-Preise für morgen sind erst ab 13:00 Uhr CET verfügbar oder unvollständig!")
-            return
-        # Debug-Output: Zeige extrahierte Preise und Timestamps für morgen
-        st.info(f"[DEBUG] Preis-Timestamps für morgen: {[str(ts) for ts in price_timestamps]}")
-        st.info(f"[DEBUG] Preise für morgen: {price_forecast}")
-        # Store forecasts
-        st.session_state.forecasts = {
-            'heat': heat_forecast,
-            'heat_timestamps': heat_timestamps,
-            'price': price_forecast,
-            'timestamps': price_timestamps
-        }
+        # Get forecasts from session state
+        forecasts = st.session_state['forecasts']
+        heat_forecast = forecasts['heat']
+        price_forecast = forecasts['price']
         
         # Step 2: Run optimization
         st.info("Step 2: Running optimization...")

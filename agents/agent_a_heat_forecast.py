@@ -10,6 +10,8 @@ import requests
 from datetime import datetime, timedelta
 import json
 from typing import Dict, List, Tuple, Optional
+import os
+import joblib
 
 class LSTMHeatForecaster(nn.Module):
     """LSTM-based heat demand forecaster"""
@@ -572,13 +574,56 @@ class AgentAHeatForecast:
             target_index = pd.date_range(start=now, periods=periods, freq=freq)
             return self._generate_synthetic_weather(target_index=target_index)
 
+    def save_model(self, path: str):
+        """Save model and scaler to file."""
+        if self.model_type == "lstm":
+            import torch
+            torch.save({
+                'model_state_dict': self.model.state_dict(),
+                'scaler': self.scaler
+            }, path)
+        elif self.model_type == "xgboost":
+            joblib.dump({'model': self.model, 'scaler': self.scaler}, path)
+        # Prophet not implemented
+
+    def load_model(self, path: str):
+        """Load model and scaler from file."""
+        if self.model_type == "lstm":
+            import torch
+            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+            input_size = checkpoint['model_state_dict']['lstm.weight_ih_l0'].shape[1]
+            self.model = LSTMHeatForecaster(input_size=input_size, output_size=1).to(self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.scaler = checkpoint['scaler']
+            self.is_trained = True
+        elif self.model_type == "xgboost":
+            data = joblib.load(path)
+            self.model = data['model']
+            self.scaler = data['scaler']
+            self.is_trained = True
+        # Prophet not implemented
+
     def train_from_csv(self, csv_path: str, lat: float = 53.5511, lon: float = 9.9937):
-        """Train the model using heat demand from CSV and aligned weather data."""
+        """Train the model using heat demand from CSV and aligned weather data. Save model after training."""
+        model_dir = "models"
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, f"agent_a_{self.model_type}.pkl")
         heat_demand = self.load_heat_demand_from_csv(csv_path)
         weather_df = self.get_weather_data(heat_demand.to_frame(), lat=lat, lon=lon)
         X, y, _ = self.prepare_data_weather_only(weather_df, heat_demand, window_hours=self.window_hours, resolution_minutes=self.resolution_minutes)
         self.train_lstm(X, y)  # Now always single-step
         self.is_trained = True
+        self.save_model(model_path)
+
+    def try_load_or_train(self, csv_path: str, lat: float = 53.5511, lon: float = 9.9937):
+        """Try to load model; if not found, train and save."""
+        model_dir = "models"
+        os.makedirs(model_dir, exist_ok=True)
+        model_path = os.path.join(model_dir, f"agent_a_{self.model_type}.pkl")
+        if os.path.exists(model_path):
+            self.load_model(model_path)
+        else:
+            self.train_from_csv(csv_path, lat=lat, lon=lon)
 
     def predict_next_7_days(self, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
         """Predict heat demand for the next 7 days (672 points, 15-min intervals)."""
