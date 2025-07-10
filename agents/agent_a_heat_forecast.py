@@ -312,15 +312,19 @@ class AgentAHeatForecast:
         return X, np.array(y), np.array(y_times)
 
     def train_lstm(self, X: np.ndarray, y: np.ndarray, epochs: int = 100):
-        """Train LSTM model with mini-batch and device support"""
+        """Train LSTM model for single-step prediction (output_size=1)."""
         from torch.utils.data import DataLoader, TensorDataset
         input_size = X.shape[2]
-        output_size = self.window_size
+        output_size = 1  # Single-step prediction
         self.model = LSTMHeatForecaster(input_size=input_size, output_size=output_size).to(self.device)
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         X_tensor = torch.FloatTensor(X)
-        y_tensor = torch.FloatTensor(y)
+        # Ensure y is shape (samples, 1)
+        if len(y.shape) == 1:
+            y_tensor = torch.FloatTensor(y).unsqueeze(-1)
+        else:
+            y_tensor = torch.FloatTensor(y)
         dataset = TensorDataset(X_tensor, y_tensor)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         for epoch in range(epochs):
@@ -503,6 +507,99 @@ class AgentAHeatForecast:
             mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
             results[name] = {'mae': mae, 'rmse': rmse, 'mape': mape}
         return results
+
+    def load_heat_demand_from_csv(self, path: str) -> pd.Series:
+        """Load heat demand from gas usage CSV (German format, semicolon, decimal comma)."""
+        import pandas as pd
+        # Find the header row with 'Einheit'
+        with open(path, encoding='utf-8') as f:
+            lines = f.readlines()
+            header_idx = next(i for i, line in enumerate(lines) if 'Einheit' in line)
+        # Read the CSV, using semicolon as separator, no header
+        df = pd.read_csv(path, skiprows=header_idx+1, header=None, sep=';')
+        # Keep only the first two columns
+        df = df.iloc[:, :2]
+        df.columns = ['datetime', 'kwh']
+        # Convert German decimal comma to dot and cast to float
+        df['kwh'] = df['kwh'].astype(str).str.replace(',', '.').astype(float)
+        # Convert datetime column to pandas datetime (dayfirst, and exact format)
+        df['datetime'] = pd.to_datetime(df['datetime'], dayfirst=True, format='%d.%m.%Y %H:%M')
+        # Set datetime as index
+        df = df.set_index('datetime')
+        # Resample to 15-min intervals if needed (mean)
+        df = df.resample(f'{self.resolution_minutes}min').mean().interpolate('linear')
+        return df['kwh']
+
+    def get_future_weather_data(self, periods: int = 672, freq: str = '15min', lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
+        """Fetch weather forecast for the next 7 days at 15-min intervals (default)."""
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        end = now + timedelta(minutes=periods * self.resolution_minutes)
+        url = f"https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
+            "forecast_days": 7,
+            "timezone": "Europe/Berlin"
+        }
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            weather_df = pd.DataFrame({
+                'timestamp': pd.to_datetime(data['hourly']['time']),
+                'temperature': data['hourly']['temperature_2m'],
+                'humidity': data['hourly']['relative_humidity_2m'],
+                'wind_speed': data['hourly']['wind_speed_10m'],
+                'precipitation': data['hourly']['precipitation']
+            }).set_index('timestamp')
+            # Resample/interpolate to 15-min intervals
+            weather_15min = weather_df.resample(freq).interpolate('linear')
+            # Limit to the next 7 days (periods)
+            weather_15min = weather_15min.iloc[:periods]
+            # Add time features
+            weather_15min['hour'] = weather_15min.index.hour
+            weather_15min['day_of_week'] = weather_15min.index.dayofweek
+            weather_15min['month'] = weather_15min.index.month
+            weather_15min['is_weekend'] = weather_15min['day_of_week'].isin([5, 6]).astype(int)
+            return weather_15min
+        except Exception as e:
+            print(f"Error fetching future weather data: {e}")
+            # Fallback: generate synthetic weather
+            target_index = pd.date_range(start=now, periods=periods, freq=freq)
+            return self._generate_synthetic_weather(target_index=target_index)
+
+    def train_from_csv(self, csv_path: str, lat: float = 53.5511, lon: float = 9.9937):
+        """Train the model using heat demand from CSV and aligned weather data."""
+        heat_demand = self.load_heat_demand_from_csv(csv_path)
+        weather_df = self.get_weather_data(heat_demand.to_frame(), lat=lat, lon=lon)
+        X, y, _ = self.prepare_data_weather_only(weather_df, heat_demand, window_hours=self.window_hours, resolution_minutes=self.resolution_minutes)
+        self.train_lstm(X, y)  # Now always single-step
+        self.is_trained = True
+
+    def predict_next_7_days(self, lat: float = 53.5511, lon: float = 9.9937) -> pd.DataFrame:
+        """Predict heat demand for the next 7 days (672 points, 15-min intervals)."""
+        periods = 7 * 24 * (60 // self.resolution_minutes)
+        weather_df = self.get_future_weather_data(periods=periods, freq=f'{self.resolution_minutes}min', lat=lat, lon=lon)
+        # Use the last available window for prediction
+        X, _, timestamps = self.prepare_data_weather_only(weather_df, None, window_hours=self.window_hours, resolution_minutes=self.resolution_minutes)
+        preds = []
+        for i in range(len(X)):
+            X_input = X[i:i+1]
+            X_tensor = torch.FloatTensor(X_input).to(self.device)
+            self.model.eval()
+            with torch.no_grad():
+                pred = self.model(X_tensor).cpu().numpy().flatten()[0]
+            preds.append(pred)
+        # preds now has one value per window, align with timestamps
+        pred_df = pd.DataFrame({
+            'timestamp': timestamps,
+            'heat_demand_forecast': preds
+        })
+        return pred_df
 
 # Example usage
 if __name__ == "__main__":

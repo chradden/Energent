@@ -73,10 +73,12 @@ class ENERGENTOrchestrator:
         print("\n📈 Running forecasting pipeline...")
         
         # Agent A - Heat Demand Forecast
-        print("🔄 Agent A: Generating heat demand forecast...")
-        weather_data = self.agents['heat_forecast'].get_weather_data()
-        self.agents['heat_forecast'].train(weather_data)
-        heat_forecast = self.agents['heat_forecast'].predict(weather_data)
+        print("\U0001F504 Agent A: Generating heat demand forecast...")
+        gas_csv_path = 'data/historical_Data/Gas usage combined_2024-01-01s.csv'
+        self.agents['heat_forecast'].train_from_csv(gas_csv_path)
+        heat_forecast_df = self.agents['heat_forecast'].predict_next_7_days()
+        heat_forecast = heat_forecast_df['heat_demand_forecast'].tolist()
+        heat_timestamps = heat_forecast_df['timestamp'].tolist()
         
         # Agent B - Electricity Price Forecast
         print("🔄 Agent B: Generating electricity price forecast...")
@@ -87,8 +89,9 @@ class ENERGENTOrchestrator:
         # Store forecasts
         forecasts = {
             'heat_demand': heat_forecast,
+            'heat_timestamps': heat_timestamps,
             'electricity_price': price_forecast,
-            'timestamps': pd.date_range(start=datetime.now(), periods=24, freq='H')
+            'timestamps': pd.date_range(start=datetime.now(), periods=len(heat_forecast), freq='15min')
         }
         
         # Save forecasts

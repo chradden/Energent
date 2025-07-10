@@ -448,17 +448,12 @@ def run_optimization(heat_model, opt_method,
         
         # Agent A - Heat Forecast
         agent_a = AgentAHeatForecast(model_type=heat_model)
-        # Dummy-DataFrame für heat_demand (48 Stunden, aktueller und nächster Tag)
-        import pandas as pd
-        import pytz
-        from datetime import datetime, timedelta
-        cet = pytz.timezone('Europe/Berlin')
-        now = datetime.now(cet)
-        timestamps = [now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=h) for h in range(48)]
-        heat_demand_dummy = pd.DataFrame({'timestamp': timestamps})
-        weather_data = agent_a.get_weather_data(heat_demand_dummy)
-        agent_a.train(weather_data)
-        heat_forecast = agent_a.predict(weather_data)
+        # Use relative path for CSV
+        gas_csv_path = 'data/historical_Data/Gas usage combined_2024-01-01s.csv'
+        agent_a.train_from_csv(gas_csv_path)
+        heat_forecast_df = agent_a.predict_next_7_days()
+        heat_forecast = heat_forecast_df['heat_demand_forecast'].tolist()
+        heat_timestamps = heat_forecast_df['timestamp'].tolist()
         
         # Agent B - Price Forecast (jetzt: echter Day-Ahead für morgen, 0-24 Uhr)
         agent_b = AgentBPriceForecast()
@@ -494,6 +489,7 @@ def run_optimization(heat_model, opt_method,
         # Store forecasts
         st.session_state.forecasts = {
             'heat': heat_forecast,
+            'heat_timestamps': heat_timestamps,
             'price': price_forecast,
             'timestamps': price_timestamps
         }
@@ -674,7 +670,7 @@ def display_forecasts(forecasts):
         # Heat demand forecast
         fig_heat = go.Figure()
         fig_heat.add_trace(go.Scatter(
-            x=forecasts['timestamps'],
+            x=forecasts['heat_timestamps'],
             y=forecasts['heat'],
             mode='lines+markers',
             name='Heat Demand',

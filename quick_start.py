@@ -37,10 +37,12 @@ def quick_demo():
         print("\n2️⃣ Generating Forecasts...")
         
         # Get weather data and generate heat forecast
-        print("   🔄 Generating heat demand forecast...")
-        weather_data = agent_a.get_weather_data()
-        agent_a.train(weather_data)
-        heat_forecast = agent_a.predict(weather_data)
+        print("   \U0001F504 Generating heat demand forecast...")
+        gas_csv_path = 'data/historical_Data/Gas usage combined_2024-01-01s.csv'
+        agent_a.train_from_csv(gas_csv_path)
+        heat_forecast_df = agent_a.predict_next_7_days()
+        heat_forecast = heat_forecast_df['heat_demand_forecast'].tolist()
+        heat_timestamps = heat_forecast_df['timestamp'].tolist()
         
         # Get price data and generate price forecast
         print("   🔄 Generating electricity price forecast...")
@@ -127,9 +129,9 @@ def quick_demo():
         
         # Save forecasts
         forecast_df = pd.DataFrame({
-            'timestamp': pd.date_range(start=datetime.now(), periods=24, freq='H'),
+            'timestamp': heat_timestamps,
             'heat_demand': heat_forecast,
-            'electricity_price': price_forecast
+            'electricity_price': price_forecast[:len(heat_forecast)]
         })
         forecast_df.to_csv('data/quick_demo_forecasts.csv', index=False)
         
