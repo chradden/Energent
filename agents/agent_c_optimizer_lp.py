@@ -200,6 +200,7 @@ class ExtendedCHPOptimizer:
                 'chp_on': [chp_on[t].value() for t in periods],
                 'boiler_on': [boiler_on[t].value() for t in periods],
                 'heat_pump_on': [heat_pump_on[t].value() for t in periods],
+                'pv_generation': pv_generation,  # Add PV generation to results
                 'objective_value': pulp.value(prob.objective),
                 'status': 'optimal'
             }
