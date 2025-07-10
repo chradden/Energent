@@ -6,7 +6,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import pytz
 
@@ -24,6 +24,15 @@ from agents.PV_forecast import PVForecaster
 
 # Electricity Forecast importieren
 from agents.agent_d_electricity_forecast import get_electricity_forecast
+
+# Add import for new XGBoost electricity agent
+def try_import_agent_e():
+    try:
+        from agents.agent_e_electricity_forecast import AgentEElectricityForecast
+        return AgentEElectricityForecast
+    except ImportError:
+        return None
+AgentEElectricityForecast = try_import_agent_e()
 
 # Page configuration
 st.set_page_config(
@@ -120,6 +129,8 @@ agent_b = AgentBPriceForecast()
 tomorrow = (datetime.now() + timedelta(days=1)).date()
 price_df = agent_b.get_prices_for_day(tomorrow)
 prices_dynamic = price_df['price'].values if not price_df.empty else np.full(24, 10.0)
+# Ensure prices_dynamic is a numpy array of float
+prices_dynamic = np.asarray(prices_dynamic, dtype=float)
 
 # Dynamischer Strompreis (all-in, stündlich)
 electricity_price_dynamic = (prices_dynamic + grid_fees + surcharges) * VAT  # ct/kWh
@@ -204,65 +215,103 @@ try:
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
 
-# Elektrizitätsverbrauchsprognose mit LSTM-Modell
-st.header("🔌 Elektrizitätsverbrauchsprognose (LSTM-Modell)")
-
+# Electricity consumption forecast (XGBoost only)
+st.header("🔌 Electricity Consumption Forecast")
 try:
-    with st.spinner("Elektrizitätsprognose wird berechnet..."):
-        # LSTM-basierte Prognose durchführen
-        forecast_df = get_electricity_forecast(
-            csv_path=electricity_csv_path,
-            lat=pv_lat,
-            lon=pv_lon,
-            forecast_hours=24
-        )
-    
+    with st.spinner("Electricity consumption forecast for the next 7 days is being calculated..."):
+        if AgentEElectricityForecast is not None:
+            agent_e = AgentEElectricityForecast()
+            agent_e.train_from_csv(electricity_csv_path, lat=pv_lat, lon=pv_lon)
+            forecast_df, _ = agent_e.predict_next_7_days(lat=pv_lat, lon=pv_lon)
+            model_used = "XGBoost"
+        else:
+            forecast_df = pd.DataFrame()
+            model_used = "Unknown"
     if not forecast_df.empty:
-        st.success("✅ Elektrizitätsprognose erfolgreich berechnet!")
-        
+        st.success(f"✅ Electricity consumption forecast ({model_used}) successfully calculated!")
         # Plotly-Visualisierung
         fig_electricity = go.Figure()
         fig_electricity.add_trace(go.Scatter(
             x=forecast_df.index,
-            y=forecast_df['forecasted_consumption_kwh'],
+            y=forecast_df['electricity_consumption_forecast'],
             mode='lines+markers',
-            name='Prognostizierter Verbrauch (kWh)',
+            name='Forecasted Consumption (kWh)',
             line=dict(color='red', width=2),
             marker=dict(size=6)
         ))
-        
         fig_electricity.update_layout(
-            title="Elektrizitätsverbrauchsprognose (LSTM-Modell)",
-            xaxis_title="Zeit",
-            yaxis_title="Prognostizierter Verbrauch (kWh)",
+            title=f"Electricity Consumption Forecast ({model_used})",
+            xaxis_title="Time",
+            yaxis_title="Forecasted Consumption (kWh)",
             height=400,
             showlegend=True
         )
-        
         st.plotly_chart(fig_electricity, use_container_width=True)
-        
-        # Tabelle mit Prognosewerten
-        st.subheader("Prognosewerte")
-        display_df = forecast_df.reset_index()
-        display_df.columns = ['Zeitstempel', 'Prognostizierter Verbrauch (kWh)']
-        display_df['Prognostizierter Verbrauch (kWh)'] = display_df['Prognostizierter Verbrauch (kWh)'].round(3)
-        st.dataframe(display_df, use_container_width=True)
-        
-        # Statistiken
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Durchschnittlicher Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].mean():.2f} kWh")
-        with col2:
-            st.metric("Maximaler Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].max():.2f} kWh")
-        with col3:
-            st.metric("Minimaler Verbrauch", f"{forecast_df['forecasted_consumption_kwh'].min():.2f} kWh")
-            
+        # New: Bar chart for average electricity consumption per day (starting from tomorrow)
+        st.subheader("Average Electricity Consumption Per Day (Next 7 Days)")
+        forecast_df_reset = forecast_df.reset_index()
+        forecast_df_reset['date'] = forecast_df_reset['timestamp'].dt.date
+        # Get tomorrow's date
+        tomorrow = date.today() + timedelta(days=1)
+        # Filter to only dates from tomorrow onwards
+        forecast_df_reset = forecast_df_reset[forecast_df_reset['date'] >= tomorrow]
+        daily_avg = forecast_df_reset.groupby('date')['electricity_consumption_forecast'].mean()
+        # Bar chart
+        import plotly.graph_objects as go
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(
+            x=daily_avg.index.astype(str),
+            y=daily_avg.values,
+            marker_color='lightskyblue',
+            name='Avg Consumption (kWh)'
+        ))
+        fig_bar.update_layout(
+            title="Average Electricity Consumption Per Day (Next 7 Days)",
+            xaxis_title="Date",
+            yaxis_title="Average Consumption (kWh)",
+            height=350,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            xaxis=dict(showgrid=True, gridcolor='lightgray'),
+            yaxis=dict(showgrid=True, gridcolor='lightgray')
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+        # New: Line chart for next 24 hours electricity forecast (styled like PV forecast)
+        st.subheader("Electricity Consumption Forecast (Next 24 Hours)")
+        import plotly.graph_objs as go
+        # Get the next 24 hours from forecast_df
+        forecast_24h = forecast_df.iloc[:24].copy()
+        # Format x-axis as hour:minute
+        forecast_24h['time'] = forecast_24h.index.strftime('%H:%M')
+        fig_24h = go.Figure()
+        fig_24h.add_trace(go.Scatter(
+            x=forecast_24h['time'],
+            y=forecast_24h['electricity_consumption_forecast'],
+            mode='lines+markers',
+            name='Electricity Consumption (kWh)',
+            line=dict(color='green', width=3, shape='spline'),
+            marker=dict(size=6)
+        ))
+        # Set x-ticks every 4 hours
+        tickvals = forecast_24h['time'][::4]
+        fig_24h.update_layout(
+            title='Electricity Consumption Forecast (Next 24 Hours)',
+            xaxis_title='Time',
+            yaxis_title='Electricity Consumption (kWh)',
+            height=400,
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            xaxis=dict(showgrid=True, gridcolor='lightgray', tickmode='array', tickvals=tickvals),
+            yaxis=dict(showgrid=True, gridcolor='lightgray'),
+            showlegend=True,
+            legend=dict(x=0.98, y=0.98, xanchor='right', yanchor='top')
+        )
+        st.plotly_chart(fig_24h, use_container_width=True)
     else:
-        st.error("❌ Elektrizitätsprognose konnte nicht berechnet werden.")
-        
+        st.error("❌ Electricity consumption forecast could not be calculated.")
 except Exception as e:
-    st.error(f"❌ Fehler bei der Elektrizitätsprognose: {str(e)}")
-    st.info("💡 Stellen Sie sicher, dass die CSV-Datei existiert und das korrekte Format hat.")
+    st.error(f"❌ Error in electricity consumption forecast: {str(e)}")
+    st.info("💡 Make sure the CSV file exists and is in the correct format.")
 
 
 def main():
@@ -329,7 +378,7 @@ def main():
         st.header("📊 System Overview")
         
         # Agent status cards
-        col1_1, col1_2, col1_3, col1_4, col1_5, col1_6, col1_7, col1_8 = st.columns(8)
+        col1_1, col1_2, col1_3, col1_4, col1_5, col1_6, col1_7, col1_8, col1_9 = st.columns(9)
         
         with col1_1:
             st.markdown("""
@@ -366,8 +415,15 @@ def main():
                 <div class="agent-status status-active">Active</div>
             </div>
             """, unsafe_allow_html=True)
-        
         with col1_5:
+            st.markdown("""
+            <div class="metric-card">
+                <h4>Agent E</h4>
+                <p>Electricity Consumption</p>
+                <div class="agent-status status-active">Active</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col1_6:
             st.markdown("""
             <div class="metric-card">
                 <h4>Battery</h4>
@@ -375,7 +431,7 @@ def main():
                 <div class="agent-status status-active">Configured</div>
             </div>
             """, unsafe_allow_html=True)
-        with col1_6:
+        with col1_7:
             st.markdown("""
             <div class="metric-card">
                 <h4>PV</h4>
@@ -383,7 +439,7 @@ def main():
                 <div class="agent-status status-active">Configured</div>
             </div>
             """, unsafe_allow_html=True)
-        with col1_7:
+        with col1_8:
             st.markdown("""
             <div class="metric-card">
                 <h4>Heat Pump</h4>
@@ -391,7 +447,7 @@ def main():
                 <div class="agent-status status-active">Configured</div>
             </div>
             """, unsafe_allow_html=True)
-        with col1_8:
+        with col1_9:
             st.markdown("""
             <div class="metric-card">
                 <h4>Electric Heater</h4>
