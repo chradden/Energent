@@ -93,10 +93,6 @@ class PVForecaster:
         cols.remove("pv_electricity(kW)")
         features = self.data[cols]
         target = self.data["pv_electricity(kW)"]
-        print("[DEBUG] Trainings-Features (X):")
-        print(features.head(24))
-        print("[DEBUG] Zielwerte (y):")
-        print(target.head(24))
         # Split the dataset into training and testing sets
         X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.3, random_state=42)
         
@@ -109,13 +105,15 @@ class PVForecaster:
         y_pred = xgb_model.predict(X_test) 
         mse = mean_squared_error(y_test, y_pred)
         self.model_mse = mse
-        print(f"[DEBUG] Modellgüte (MSE): {mse}")
     
     def predict_next_day(self):
         # get weather and other stuff
         weather = self.weather_forecast(self.latitude, self.longitude, self.weather_variables)
         df = pl.from_dict(weather)
         df = df.with_columns(pl.col("time").str.to_datetime())
+        # filter only tomorrow's data, using slice for now
+        df = df.slice(24, 24)
+        print(df)
         ## get sun position for each hour and add to the dataframe
         df = df.with_columns(
             pl.col("time").map_elements(lambda x: get_position(x, lng=self.longitude, lat=self.latitude)).alias("sun_position")
@@ -139,11 +137,8 @@ class PVForecaster:
             pl.col("direct_radiation"),
             pl.col("cloud_cover")
         )
-        print("[DEBUG] Features für Vorhersage (next day):")
-        print(df.head(24))
+
         y_pred = self.model.predict(df)
-        print("[DEBUG] Vorhersage (y_pred):")
-        print(y_pred[:24])
         return y_pred
     
     def weather_forecast(self, lat: float, lon: float, variables: list):
@@ -152,7 +147,7 @@ class PVForecaster:
             "latitude": lat,
             "longitude": lon,
             "hourly": ",".join(variables),
-            "forecast_days": 1,
+            "forecast_days": 3,
             "timezone": self.timezone
         }
         response = requests.get(url, params=params)
