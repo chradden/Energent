@@ -179,6 +179,28 @@ try:
         'PV-Leistung (kW)': pv_pred
     })
     st.dataframe(df_pv, use_container_width=True)
+
+    # Add a line chart for PV forecast
+    import plotly.graph_objs as go
+    # Ensure Zeit is datetime
+    df_pv['Zeit'] = pd.to_datetime(df_pv['Zeit'])
+    fig_pv = go.Figure()
+    fig_pv.add_trace(go.Scatter(
+        x=df_pv['Zeit'],
+        y=df_pv['PV-Leistung (kW)'],
+        mode='lines+markers',
+        name='PV-Leistung (kW)',
+        line=dict(color='orange', width=2),
+        marker=dict(size=6)
+    ))
+    fig_pv.update_layout(
+        title='PV-Leistungsvorhersage für morgen',
+        xaxis_title='Zeit',
+        yaxis_title='PV-Leistung (kW)',
+        height=400,
+        showlegend=True
+    )
+    st.plotly_chart(fig_pv, use_container_width=True)
 except Exception as e:
     st.error(f"Fehler bei der PV-Vorhersage: {e}")
 
