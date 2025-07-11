@@ -261,6 +261,7 @@ if (
         # Update forecasts with real price data
         st.session_state['forecasts']['price'] = price_forecast
         st.session_state['forecasts']['timestamps'] = price_timestamps
+        st.session_state['forecasts']['price_timestamps'] = price_timestamps
     else:
         st.warning("Could not fetch price data, using placeholder values")
 
@@ -579,6 +580,9 @@ def run_optimization(heat_model, opt_method,
         forecasts = st.session_state['forecasts']
         heat_forecast = forecasts['heat']
         price_forecast = forecasts['price']
+        pv_forecast = forecasts.get('pv', [0]*24)
+        electricity_forecast = forecasts.get('electricity', [0]*24)
+        weather_data = forecasts.get('weather', [{}]*24)
         
         # Step 2: Run optimization
         st.info("Step 2: Running optimization...")
@@ -875,7 +879,7 @@ def display_forecasts(forecasts):
         # Electricity price forecast
         fig_price = go.Figure()
         fig_price.add_trace(go.Scatter(
-            x=forecasts['price_timestamps'],
+            x=forecasts.get('price_timestamps', forecasts.get('timestamps', list(range(24)))),
             y=forecasts['price'],
             mode='lines+markers',
             name='Electricity Price',
@@ -940,7 +944,7 @@ def display_optimization_results(results):
     # Power generation
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['price_timestamps'],
+            x=st.session_state.forecasts.get('price_timestamps', st.session_state.forecasts.get('timestamps', list(range(24)))),
             y=results['chp_power'],
             mode='lines+markers',
             name='CHP Power',
@@ -952,7 +956,7 @@ def display_optimization_results(results):
     # Heat generation
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['price_timestamps'],
+            x=st.session_state.forecasts.get('price_timestamps', st.session_state.forecasts.get('timestamps', list(range(24)))),
             y=results['chp_heat'],
             mode='lines+markers',
             name='CHP Heat',
@@ -963,7 +967,7 @@ def display_optimization_results(results):
     
     fig.add_trace(
         go.Scatter(
-            x=st.session_state.forecasts['price_timestamps'],
+            x=st.session_state.forecasts.get('price_timestamps', st.session_state.forecasts.get('timestamps', list(range(24)))),
             y=results['boiler_heat'],
             mode='lines+markers',
             name='Boiler Heat',
@@ -982,7 +986,7 @@ def display_optimization_results(results):
         # Storage level
         fig_storage = go.Figure()
         fig_storage.add_trace(go.Scatter(
-            x=st.session_state.forecasts['price_timestamps'],
+            x=st.session_state.forecasts.get('price_timestamps', st.session_state.forecasts.get('timestamps', list(range(24)))),
             y=results['storage'],
             mode='lines+markers',
             name='Storage Level',
@@ -1014,7 +1018,7 @@ def display_optimization_results(results):
 
     # Nach den bisherigen Plots:
     if 'pv_generation' in results:
-        display_component_time_series(results, st.session_state.forecasts['price_timestamps'])
+        display_component_time_series(results, st.session_state.forecasts.get('price_timestamps', st.session_state.forecasts.get('timestamps', list(range(24)))))
 
 def display_component_time_series(results, timestamps):
     """Zeige Zeitreihen für alle Komponenten als Tabs"""
